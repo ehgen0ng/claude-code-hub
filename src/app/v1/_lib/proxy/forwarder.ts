@@ -847,10 +847,7 @@ export class ProxyForwarder {
             user: msg.user,
           };
 
-          if (
-            provider.websiteUrl &&
-            !provider.websiteUrl.toLowerCase().startsWith("http")
-          ) {
+          if (provider.websiteUrl && !provider.websiteUrl.toLowerCase().startsWith("http")) {
             const beforeOverride = { ...userIdentifiers };
 
             if (msg.metadata && typeof msg.metadata === "object") {

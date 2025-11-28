@@ -326,11 +326,7 @@ export const CreateProviderSchema = z.object({
     ])
     .optional(),
   // 供应商官网地址
-  website_url: z
-    .string()
-    .max(512, "长度不能超过512个字符")
-    .nullable()
-    .optional(),
+  website_url: z.string().max(512, "长度不能超过512个字符").nullable().optional(),
   favicon_url: z.string().max(512, "Favicon URL长度不能超过512个字符").nullable().optional(),
   // 废弃字段（保留向后兼容，不再验证范围）
   tpm: z.number().int().nullable().optional(),
@@ -508,11 +504,7 @@ export const UpdateProviderSchema = z
       ])
       .optional(),
     // 供应商官网地址
-    website_url: z
-      .string()
-      .max(512, "长度不能超过512个字符")
-      .nullable()
-      .optional(),
+    website_url: z.string().max(512, "长度不能超过512个字符").nullable().optional(),
     favicon_url: z.string().max(512, "Favicon URL长度不能超过512个字符").nullable().optional(),
     // 废弃字段（保留向后兼容，不再验证范围）
     tpm: z.number().int().nullable().optional(),
