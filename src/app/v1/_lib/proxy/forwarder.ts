@@ -832,21 +832,26 @@ export class ProxyForwarder {
 
       if (hasBody) {
         const filteredMessage = filterPrivateParameters(session.request.message);
-        if (
-          provider.websiteUrl &&
-          !provider.websiteUrl.toLowerCase().startsWith("http")
-        ) {
-          if (typeof filteredMessage === "object" && filteredMessage !== null) {
-            const msg = filteredMessage as Record<string, unknown>;
+        if (typeof filteredMessage === "object" && filteredMessage !== null) {
+          const msg = filteredMessage as Record<string, unknown>;
 
-            const beforeOverride = {
-              metadataUserId:
-                msg.metadata && typeof msg.metadata === "object"
-                  ? (msg.metadata as Record<string, unknown>).user_id
-                  : undefined,
-              previousResponseId: msg.previous_response_id,
-              user: msg.user,
-            };
+          const filterUndefined = (obj: Record<string, unknown>) =>
+            Object.fromEntries(Object.entries(obj).filter(([_, v]) => v !== undefined));
+
+          const userIdentifiers = {
+            metadataUserId:
+              msg.metadata && typeof msg.metadata === "object"
+                ? (msg.metadata as Record<string, unknown>).user_id
+                : undefined,
+            previousResponseId: msg.previous_response_id,
+            user: msg.user,
+          };
+
+          if (
+            provider.websiteUrl &&
+            !provider.websiteUrl.toLowerCase().startsWith("http")
+          ) {
+            const beforeOverride = { ...userIdentifiers };
 
             if (msg.metadata && typeof msg.metadata === "object") {
               (msg.metadata as Record<string, unknown>).user_id = provider.websiteUrl;
@@ -864,9 +869,6 @@ export class ProxyForwarder {
               user: msg.user,
             };
 
-            const filterUndefined = (obj: Record<string, unknown>) =>
-              Object.fromEntries(Object.entries(obj).filter(([_, v]) => v !== undefined));
-
             logger.info("ProxyForwarder: User identifier override applied", {
               providerId: provider.id,
               providerName: provider.name,
@@ -874,6 +876,16 @@ export class ProxyForwarder {
               before: filterUndefined(beforeOverride),
               after: filterUndefined(afterOverride),
             });
+          } else {
+            const filteredIdentifiers = filterUndefined(userIdentifiers);
+            if (Object.keys(filteredIdentifiers).length > 0) {
+              logger.info("ProxyForwarder: User identifiers (no override)", {
+                providerId: provider.id,
+                providerName: provider.name,
+                websiteUrl: provider.websiteUrl || "(empty)",
+                identifiers: filteredIdentifiers,
+              });
+            }
           }
         }
 

@@ -268,11 +268,6 @@ export function ProviderForm({
       return;
     }
 
-    // 验证 websiteUrl（可选，但如果填写了必须是有效 URL）
-    if (websiteUrl.trim() && !isValidUrl(websiteUrl.trim())) {
-      toast.error(t("errors.invalidWebsiteUrl"));
-      return;
-    }
 
     // 处理模型重定向（空对象转为 null）
     const parsedModelRedirects = Object.keys(modelRedirects).length > 0 ? modelRedirects : null;
@@ -533,7 +528,7 @@ export function ProviderForm({
           </Label>
           <Input
             id={isEdit ? "edit-website-url" : "website-url"}
-            type="url"
+            type="text"
             value={websiteUrl}
             onChange={(e) => setWebsiteUrl(e.target.value)}
             placeholder={t("websiteUrl.placeholder")}

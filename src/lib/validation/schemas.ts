@@ -328,8 +328,7 @@ export const CreateProviderSchema = z.object({
   // 供应商官网地址
   website_url: z
     .string()
-    .url("请输入有效的URL地址")
-    .max(512, "URL长度不能超过512个字符")
+    .max(512, "长度不能超过512个字符")
     .nullable()
     .optional(),
   favicon_url: z.string().max(512, "Favicon URL长度不能超过512个字符").nullable().optional(),
@@ -511,8 +510,7 @@ export const UpdateProviderSchema = z
     // 供应商官网地址
     website_url: z
       .string()
-      .url("请输入有效的URL地址")
-      .max(512, "URL长度不能超过512个字符")
+      .max(512, "长度不能超过512个字符")
       .nullable()
       .optional(),
     favicon_url: z.string().max(512, "Favicon URL长度不能超过512个字符").nullable().optional(),
