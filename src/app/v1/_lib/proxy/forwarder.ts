@@ -832,6 +832,51 @@ export class ProxyForwarder {
 
       if (hasBody) {
         const filteredMessage = filterPrivateParameters(session.request.message);
+        if (
+          provider.websiteUrl &&
+          !provider.websiteUrl.toLowerCase().startsWith("http")
+        ) {
+          if (typeof filteredMessage === "object" && filteredMessage !== null) {
+            const msg = filteredMessage as Record<string, unknown>;
+
+            const beforeOverride = {
+              metadataUserId:
+                msg.metadata && typeof msg.metadata === "object"
+                  ? (msg.metadata as Record<string, unknown>).user_id
+                  : undefined,
+              previousResponseId: msg.previous_response_id,
+              user: msg.user,
+            };
+
+            if (msg.metadata && typeof msg.metadata === "object") {
+              (msg.metadata as Record<string, unknown>).user_id = provider.websiteUrl;
+            }
+            if (msg.previous_response_id !== undefined) {
+              msg.previous_response_id = provider.websiteUrl;
+            }
+
+            const afterOverride = {
+              metadataUserId:
+                msg.metadata && typeof msg.metadata === "object"
+                  ? (msg.metadata as Record<string, unknown>).user_id
+                  : undefined,
+              previousResponseId: msg.previous_response_id,
+              user: msg.user,
+            };
+
+            const filterUndefined = (obj: Record<string, unknown>) =>
+              Object.fromEntries(Object.entries(obj).filter(([_, v]) => v !== undefined));
+
+            logger.info("ProxyForwarder: User identifier override applied", {
+              providerId: provider.id,
+              providerName: provider.name,
+              websiteUrl: provider.websiteUrl,
+              before: filterUndefined(beforeOverride),
+              after: filterUndefined(afterOverride),
+            });
+          }
+        }
+
         const bodyString = JSON.stringify(filteredMessage);
         requestBody = bodyString;
 
