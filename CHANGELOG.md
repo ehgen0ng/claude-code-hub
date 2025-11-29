@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Add error response override feature allowing custom response body and status code configuration for error rules (#234) @ding113
+- Add Overlay and Stacked display modes for dashboard statistics charts (#234) @ding113
 - Add provider availability monitoring dashboard with real-time health status, metrics, and heatmap visualization (#216) @ding113
 - Add smart circuit breaker probing for faster provider recovery with configurable intervals (#216) @ding113
 - Add enhanced provider testing with three-layer validation and preset templates for relay service verification (#216) @ding113
@@ -17,6 +19,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Improve drizzle.config.ts to follow Next.js env file priority order (#234) @ding113
+- Optimize navigation translations across all locales (en, ja, ru, zh-CN, zh-TW) (#234) @ding113
+- Improve `prompt_limit` error rule regex pattern matching (#234) @ding113
 - Improve provider page performance by fixing N+1 queries and SQL full table scans (#216) @ding113
 - Enhance error parsing with nested error structure support for relay services (#216) @ding113
 - Adjust streaming idle timeout range from 1-120s to 60-600s (0 to disable) (#216) @ding113
@@ -30,15 +35,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- Fix session binding not updating after provider failover, causing repeated attempts to failed providers (#220) @ding113
-- Fix provider availability monitoring page sorting order so high-availability providers rank first (#219) @ding113
-- Fix provider daily usage statistics JSONB field name error (#216) @ding113
-- Fix response content validation failure in provider testing (#216) @ding113
-- Fix login redirect displaying duplicate language prefix (#216) @ding113
-- Fix zh-TW missing 8 translation keys for apiTest (#216) @ding113
-- Remove DialogContent hardcoded `sm:max-w-lg` width constraint (#216) @ding113
-- Fix model test disclaimer display order (#210) @ding113
-- Fix provider statistics, group settings persistence, and usage records date filtering; consolidate migrations 0020-0025 into single idempotent file (#207) @ding113
+- Fix API action adapter to pass schema params as positional args instead of object (#232) @ding113
+- Fix availability monitoring Invalid Date error when selecting 15-minute time range (#231) @ding113
 - Fix database migration duplicate enum type creation error (#181) @ding113
 - Fix error handling and status codes in response handler, improve user management page UX (#179) @ding113
 - Fix infinite loop in leaderboard tab switching (#178) @ding113
