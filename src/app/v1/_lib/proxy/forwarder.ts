@@ -843,8 +843,6 @@ export class ProxyForwarder {
               msg.metadata && typeof msg.metadata === "object"
                 ? (msg.metadata as Record<string, unknown>).user_id
                 : undefined,
-            previousResponseId: msg.previous_response_id,
-            user: msg.user,
           };
 
           if (provider.websiteUrl && !provider.websiteUrl.toLowerCase().startsWith("http")) {
@@ -853,17 +851,12 @@ export class ProxyForwarder {
             if (msg.metadata && typeof msg.metadata === "object") {
               (msg.metadata as Record<string, unknown>).user_id = provider.websiteUrl;
             }
-            if (msg.previous_response_id !== undefined) {
-              msg.previous_response_id = provider.websiteUrl;
-            }
 
             const afterOverride = {
               metadataUserId:
                 msg.metadata && typeof msg.metadata === "object"
                   ? (msg.metadata as Record<string, unknown>).user_id
                   : undefined,
-              previousResponseId: msg.previous_response_id,
-              user: msg.user,
             };
 
             logger.info("ProxyForwarder: User identifier override applied", {
