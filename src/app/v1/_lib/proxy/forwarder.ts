@@ -1,7 +1,7 @@
 import type { Readable } from "node:stream";
 import { createGunzip, constants as zlibConstants } from "node:zlib";
 import type { Dispatcher } from "undici";
-import { request as undiciRequest } from "undici";
+import { Agent, request as undiciRequest } from "undici";
 import {
   getCircuitState,
   getProviderHealthInfo,
@@ -9,7 +9,9 @@ import {
   recordSuccess,
 } from "@/lib/circuit-breaker";
 import { CodexInstructionsCache } from "@/lib/codex-instructions-cache";
+import { isHttp2Enabled } from "@/lib/config";
 import { getEnvConfig } from "@/lib/config/env.schema";
+import { PROVIDER_DEFAULTS, PROVIDER_LIMITS } from "@/lib/constants/provider.constants";
 import { logger } from "@/lib/logger";
 import { createProxyAgentForProvider } from "@/lib/proxy-agent";
 import { SessionManager } from "@/lib/session-manager";
@@ -21,7 +23,13 @@ import { GeminiAuth } from "../gemini/auth";
 import { GEMINI_PROTOCOL } from "../gemini/protocol";
 import { HeaderProcessor } from "../headers";
 import { buildProxyUrl } from "../url";
-import { categorizeError, ErrorCategory, isClientAbortError, ProxyError } from "./errors";
+import {
+  categorizeError,
+  ErrorCategory,
+  isClientAbortError,
+  isHttp2Error,
+  ProxyError,
+} from "./errors";
 import { mapClientFormatToTransformer, mapProviderTypeToTransformer } from "./format-mapper";
 import { ModelRedirector } from "./model-redirector";
 import { ProxyProviderResolver } from "./provider-selector";
@@ -35,8 +43,25 @@ const STANDARD_ENDPOINTS = [
   "/v1/models",
 ];
 
-const MAX_ATTEMPTS_PER_PROVIDER = 2; // 每个供应商最多尝试次数（首次 + 1次重试）
+const RETRY_LIMITS = PROVIDER_LIMITS.MAX_RETRY_ATTEMPTS;
 const MAX_PROVIDER_SWITCHES = 20; // 保险栓：最多切换 20 次供应商（防止无限循环）
+
+function clampRetryAttempts(value: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return RETRY_LIMITS.MIN;
+  return Math.min(Math.max(numeric, RETRY_LIMITS.MIN), RETRY_LIMITS.MAX);
+}
+
+function resolveMaxAttemptsForProvider(
+  provider: ProxySession["provider"],
+  envDefault: number
+): number {
+  const baseDefault = clampRetryAttempts(envDefault ?? PROVIDER_DEFAULTS.MAX_RETRY_ATTEMPTS);
+  if (!provider || provider.maxRetryAttempts === null || provider.maxRetryAttempts === undefined) {
+    return baseDefault;
+  }
+  return clampRetryAttempts(provider.maxRetryAttempts);
+}
 
 /**
  * 过滤私有参数（下划线前缀）
@@ -89,6 +114,9 @@ export class ProxyForwarder {
       throw new Error("代理上下文缺少供应商或鉴权信息");
     }
 
+    const env = getEnvConfig();
+    const envDefaultMaxAttempts = clampRetryAttempts(env.MAX_RETRY_ATTEMPTS_DEFAULT);
+
     let lastError: Error | null = null;
     let currentProvider = session.provider;
     const failedProviderIds: number[] = []; // 记录已失败的供应商ID
@@ -99,14 +127,20 @@ export class ProxyForwarder {
       totalProvidersAttempted++;
       let attemptCount = 0; // 当前供应商的尝试次数
 
+      const maxAttemptsPerProvider = resolveMaxAttemptsForProvider(
+        currentProvider,
+        envDefaultMaxAttempts
+      );
+
       logger.info("ProxyForwarder: Trying provider", {
         providerId: currentProvider.id,
         providerName: currentProvider.name,
         totalProvidersAttempted,
+        maxRetryAttempts: maxAttemptsPerProvider,
       });
 
-      // ========== 内层循环：重试当前供应商（最多 MAX_ATTEMPTS_PER_PROVIDER 次）==========
-      while (attemptCount < MAX_ATTEMPTS_PER_PROVIDER) {
+      // ========== 内层循环：重试当前供应商（根据配置最多尝试 maxAttemptsPerProvider 次）==========
+      while (attemptCount < maxAttemptsPerProvider) {
         attemptCount++;
 
         try {
@@ -309,7 +343,7 @@ export class ProxyForwarder {
               error: errorMessage,
               attemptNumber: attemptCount,
               totalProvidersAttempted,
-              willRetry: attemptCount < MAX_ATTEMPTS_PER_PROVIDER,
+              willRetry: attemptCount < maxAttemptsPerProvider,
             });
 
             // 记录到决策链（不计入 failedProviderIds）
@@ -330,7 +364,7 @@ export class ProxyForwarder {
             });
 
             // 第1次失败：等待100ms后重试当前供应商
-            if (attemptCount < MAX_ATTEMPTS_PER_PROVIDER) {
+            if (attemptCount < maxAttemptsPerProvider) {
               await new Promise((resolve) => setTimeout(resolve, 100));
               continue; // ⭐ 继续内层循环（重试当前供应商）
             }
@@ -1020,8 +1054,11 @@ export class ProxyForwarder {
       ...(requestBody ? { body: requestBody } : {}),
     };
 
+    // ⭐ 获取 HTTP/2 全局开关设置
+    const enableHttp2 = await isHttp2Enabled();
+
     // ⭐ 应用代理配置（如果配置了）
-    const proxyConfig = createProxyAgentForProvider(provider, proxyUrl);
+    const proxyConfig = createProxyAgentForProvider(provider, proxyUrl, enableHttp2);
     if (proxyConfig) {
       init.dispatcher = proxyConfig.agent;
       logger.info("ProxyForwarder: Using proxy", {
@@ -1030,6 +1067,14 @@ export class ProxyForwarder {
         proxyUrl: proxyConfig.proxyUrl,
         fallbackToDirect: proxyConfig.fallbackToDirect,
         targetUrl: new URL(proxyUrl).origin,
+        http2Enabled: proxyConfig.http2Enabled,
+      });
+    } else if (enableHttp2) {
+      // 直连场景：创建支持 HTTP/2 的 Agent
+      init.dispatcher = new Agent({ allowH2: true });
+      logger.debug("ProxyForwarder: Using HTTP/2 Agent for direct connection", {
+        providerId: provider.id,
+        providerName: provider.name,
       });
     }
 
@@ -1130,6 +1175,7 @@ export class ProxyForwarder {
             idleTimeoutMs: provider.streamingIdleTimeoutMs,
             errorName: err.name,
             errorMessage: err.message || "(empty message)",
+            errorCode: err.code || "N/A",
             reason:
               "Idle timeout indicates provider stopped sending data, should count towards circuit breaker",
           }
@@ -1180,8 +1226,88 @@ export class ProxyForwarder {
         );
       }
 
-      // ⭐ 代理相关错误处理（如果配置了代理）
-      if (proxyConfig) {
+      // ⭐ HTTP/2 协议错误检测与透明回退
+      // 场景：HTTP/2 连接失败（GOAWAY、RST_STREAM、PROTOCOL_ERROR 等）
+      // 策略：透明回退到 HTTP/1.1，不触发供应商切换或熔断器
+      if (enableHttp2 && isHttp2Error(err)) {
+        logger.warn("ProxyForwarder: HTTP/2 protocol error detected, falling back to HTTP/1.1", {
+          providerId: provider.id,
+          providerName: provider.name,
+          errorName: err.name,
+          errorMessage: err.message || "(empty message)",
+          errorCode: err.code || "N/A",
+        });
+
+        // 记录到决策链（标记为 HTTP/2 回退）
+        session.addProviderToChain(provider, {
+          reason: "http2_fallback",
+          circuitState: getCircuitState(provider.id),
+          attemptNumber: 1,
+          errorMessage: `HTTP/2 error: ${err.message}`,
+          errorDetails: {
+            system: {
+              errorType: "Http2Error",
+              errorName: err.name,
+              errorCode: err.code || "HTTP2_FAILED",
+              errorStack: err.stack?.split("\n").slice(0, 3).join("\n"),
+            },
+          },
+        });
+
+        // 创建 HTTP/1.1 回退配置（移除 HTTP/2 Agent）
+        const http1FallbackInit = { ...init };
+        delete http1FallbackInit.dispatcher;
+
+        // 如果使用了代理，创建不支持 HTTP/2 的代理 Agent
+        if (proxyConfig) {
+          const http1ProxyConfig = createProxyAgentForProvider(provider, proxyUrl, false);
+          if (http1ProxyConfig) {
+            http1FallbackInit.dispatcher = http1ProxyConfig.agent;
+          }
+        }
+
+        try {
+          // 使用 HTTP/1.1 重试
+          response = isGeminiProvider
+            ? await ProxyForwarder.fetchWithoutAutoDecode(
+                proxyUrl,
+                http1FallbackInit,
+                provider.id,
+                provider.name
+              )
+            : await fetch(proxyUrl, http1FallbackInit);
+
+          logger.info("ProxyForwarder: HTTP/1.1 fallback succeeded", {
+            providerId: provider.id,
+            providerName: provider.name,
+          });
+
+          // 重新启动响应超时计时器（如果之前有配置超时时间）
+          // 注意：responseTimeoutId 在 catch 块开头已被清除，这里只需检查 responseTimeoutMs
+          if (responseTimeoutMs > 0) {
+            responseTimeoutId = setTimeout(() => {
+              responseController.abort();
+              logger.warn("ProxyForwarder: Response timeout after HTTP/1.1 fallback", {
+                providerId: provider.id,
+                providerName: provider.name,
+                responseTimeoutMs,
+              });
+            }, responseTimeoutMs);
+          }
+
+          // 成功后跳过 throw，继续执行后续逻辑（不计入熔断器）
+        } catch (http1Error) {
+          // HTTP/1.1 也失败，记录并抛出原始错误
+          logger.error("ProxyForwarder: HTTP/1.1 fallback also failed", {
+            providerId: provider.id,
+            providerName: provider.name,
+            http1Error: http1Error instanceof Error ? http1Error.message : String(http1Error),
+          });
+
+          // 抛出 HTTP/1.1 错误，让正常的错误处理流程处理
+          throw http1Error;
+        }
+      } else if (proxyConfig) {
         const isProxyError =
           err.message.includes("proxy") ||
           err.message.includes("ECONNREFUSED") ||
@@ -1233,16 +1359,19 @@ export class ProxyForwarder {
           logger.error("ProxyForwarder: Fetch failed (with proxy configured)", {
             providerId: provider.id,
             providerName: provider.name,
-            proxyUrl: new URL(proxyUrl).origin,
-            proxyConfigured: proxyConfig.proxyUrl,
+            proxyUrl: new URL(proxyUrl).origin, // 只记录域名，隐藏查询参数和 API Key
+
+            // ⭐ 详细错误信息（关键诊断字段）
             errorType: err.constructor.name,
             errorName: err.name,
             errorMessage: err.message,
-            errorCode: err.code,
-            errorSyscall: err.syscall,
+            errorCode: err.code, // ⭐ 如 'ENOTFOUND'（DNS失败）、'ECONNREFUSED'（连接拒绝）、'ETIMEDOUT'（超时）、'ECONNRESET'（连接重置）
+            errorSyscall: err.syscall, // ⭐ 如 'getaddrinfo'（DNS查询）、'connect'（TCP连接）
             errorErrno: err.errno,
             errorCause: err.cause,
-            errorStack: err.stack?.split("\n").slice(0, 3).join("\n"),
+            errorStack: err.stack?.split("\n").slice(0, 3).join("\n"), // 前3行堆栈
+
+            // 请求上下文
             method: session.method,
             hasBody: !!requestBody,
             bodySize: requestBody ? JSON.stringify(requestBody).length : 0,
@@ -1391,7 +1520,7 @@ export class ProxyForwarder {
    * 当上游服务器忽略 accept-encoding: identity 仍返回 gzip 时，如果 gzip 流被提前终止
    * （如连接关闭），undici 的 Gunzip 会抛出 "TypeError: terminated" 错误。
    *
-   * 解决方案：使用 undici.request 获取未解压的原始流，手动用容错方式处理 gzip。
+   * 解决方案：使用 undici.request 获取未自动解压的原始流，手动用容错方式处理 gzip。
    */
   private static async fetchWithoutAutoDecode(
     url: string,

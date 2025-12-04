@@ -17,6 +17,7 @@ export interface User {
   limit5hUsd?: number; // 5小时消费上限（美元）
   limitWeeklyUsd?: number; // 周消费上限（美元）
   limitMonthlyUsd?: number; // 月消费上限（美元）
+  limitTotalUsd?: number | null; // 总消费上限（美元）
   limitConcurrentSessions?: number; // 并发 Session 上限
 }
 
@@ -34,6 +35,7 @@ export interface CreateUserData {
   limit5hUsd?: number;
   limitWeeklyUsd?: number;
   limitMonthlyUsd?: number;
+  limitTotalUsd?: number | null;
   limitConcurrentSessions?: number;
 }
 
@@ -51,6 +53,7 @@ export interface UpdateUserData {
   limit5hUsd?: number;
   limitWeeklyUsd?: number;
   limitMonthlyUsd?: number;
+  limitTotalUsd?: number | null;
   limitConcurrentSessions?: number;
 }
 
@@ -81,9 +84,11 @@ export interface UserKeyDisplay {
   // 限额配置
   limit5hUsd: number | null; // 5小时消费上限（美元）
   limitDailyUsd: number | null; // 每日消费上限
+  dailyResetMode: "fixed" | "rolling"; // 每日重置模式
   dailyResetTime: string; // 每日重置时间
   limitWeeklyUsd: number | null; // 周消费上限（美元）
   limitMonthlyUsd: number | null; // 月消费上限（美元）
+  limitTotalUsd?: number | null; // 总消费上限（美元）
   limitConcurrentSessions: number; // 并发 Session 上限
 }
 
@@ -104,6 +109,7 @@ export interface UserDisplay {
   limit5hUsd?: number | null;
   limitWeeklyUsd?: number | null;
   limitMonthlyUsd?: number | null;
+  limitTotalUsd?: number | null;
   limitConcurrentSessions?: number | null;
 }
 

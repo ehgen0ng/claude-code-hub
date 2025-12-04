@@ -16,6 +16,10 @@ export function toUser(dbUser: any): User {
     dailyQuota: dbUser?.dailyQuota ? parseFloat(dbUser.dailyQuota) : 0,
     providerGroup: dbUser?.providerGroup ?? null,
     tags: dbUser?.tags ?? [],
+    limitTotalUsd:
+      dbUser?.limitTotalUsd !== null && dbUser?.limitTotalUsd !== undefined
+        ? parseFloat(dbUser.limitTotalUsd)
+        : null,
     createdAt: dbUser?.createdAt ? new Date(dbUser.createdAt) : new Date(),
     updatedAt: dbUser?.updatedAt ? new Date(dbUser.updatedAt) : new Date(),
   };
@@ -32,6 +36,10 @@ export function toKey(dbKey: any): Key {
     dailyResetTime: dbKey?.dailyResetTime ?? "00:00",
     limitWeeklyUsd: dbKey?.limitWeeklyUsd ? parseFloat(dbKey.limitWeeklyUsd) : null,
     limitMonthlyUsd: dbKey?.limitMonthlyUsd ? parseFloat(dbKey.limitMonthlyUsd) : null,
+    limitTotalUsd:
+      dbKey?.limitTotalUsd !== null && dbKey?.limitTotalUsd !== undefined
+        ? parseFloat(dbKey.limitTotalUsd)
+        : null,
     limitConcurrentSessions: dbKey?.limitConcurrentSessions ?? 0,
     createdAt: dbKey?.createdAt ? new Date(dbKey.createdAt) : new Date(),
     updatedAt: dbKey?.updatedAt ? new Date(dbKey.updatedAt) : new Date(),
@@ -58,6 +66,10 @@ export function toProvider(dbProvider: any): Provider {
     limitWeeklyUsd: dbProvider?.limitWeeklyUsd ? parseFloat(dbProvider.limitWeeklyUsd) : null,
     limitMonthlyUsd: dbProvider?.limitMonthlyUsd ? parseFloat(dbProvider.limitMonthlyUsd) : null,
     limitConcurrentSessions: dbProvider?.limitConcurrentSessions ?? 0,
+    maxRetryAttempts:
+      dbProvider?.maxRetryAttempts !== undefined && dbProvider?.maxRetryAttempts !== null
+        ? Number(dbProvider.maxRetryAttempts)
+        : null,
     circuitBreakerFailureThreshold: dbProvider?.circuitBreakerFailureThreshold ?? 5,
     circuitBreakerOpenDuration: dbProvider?.circuitBreakerOpenDuration ?? 1800000,
     circuitBreakerHalfOpenSuccessThreshold: dbProvider?.circuitBreakerHalfOpenSuccessThreshold ?? 2,
@@ -114,6 +126,7 @@ export function toSystemSettings(dbSettings: any): SystemSettings {
     cleanupBatchSize: dbSettings?.cleanupBatchSize ?? 10000,
     enableClientVersionCheck: dbSettings?.enableClientVersionCheck ?? false,
     verboseProviderError: dbSettings?.verboseProviderError ?? false,
+    enableHttp2: dbSettings?.enableHttp2 ?? false,
     createdAt: dbSettings?.createdAt ? new Date(dbSettings.createdAt) : new Date(),
     updatedAt: dbSettings?.updatedAt ? new Date(dbSettings.updatedAt) : new Date(),
   };

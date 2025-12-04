@@ -59,6 +59,7 @@
       "endpoint": "端点",
       "status": "状态",
       "timeRange": "时间范围",
+      "dateRange": "日期范围",
       "startTime": "开始时间",
       "endTime": "结束时间",
       "allUsers": "全部用户",
@@ -195,6 +196,14 @@
   "leaderboard": {
     "title": "成本排行榜",
     "description": "查看用户和密钥的成本统计排名",
+    "todayTitle": "今日排行榜",
+    "viewAll": "查看全部",
+    "userRankings": "用户排行",
+    "providerRankings": "供应商排行",
+    "modelRankings": "模型排行",
+    "noData": "今日暂无数据",
+    "requests": "请求",
+    "tokens": "Token",
     "tabs": {
       "users": "用户排行",
       "keys": "密钥排行",
@@ -516,6 +525,7 @@
     "costDaily": "每日消费",
     "costWeekly": "周消费",
     "costMonthly": "月消费",
+    "costTotal": "总消费",
     "concurrentSessions": "并发 Session",
     "noLimit": "无限额限制"
   },
@@ -575,6 +585,12 @@
       "placeholder": "留空表示无限制",
       "description": "每月最大消费金额",
       "descriptionWithUserLimit": "每月最大消费金额（用户限额: ${limit}）"
+    },
+    "limitTotalUsd": {
+      "label": "总消费上限 (USD)",
+      "placeholder": "留空表示无限制",
+      "description": "累计消费上限（不重置）",
+      "descriptionWithUserLimit": "累计消费上限（用户限额: ${limit}）"
     },
     "limitConcurrentSessions": {
       "label": "并发 Session 上限",
@@ -648,6 +664,11 @@
       "label": "月限额 (USD)",
       "placeholder": "留空表示无限制",
       "description": "每月最大消费金额"
+    },
+    "limitTotalUsd": {
+      "label": "总限额 (USD)",
+      "placeholder": "留空表示无限制",
+      "description": "累计消费上限（不重置）"
     },
     "limitConcurrentSessions": {
       "label": "并发 Session 上限",

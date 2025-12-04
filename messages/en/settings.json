@@ -100,6 +100,8 @@
       "allowGlobalViewDesc": "When disabled, regular users can only view their own key usage statistics in the dashboard.",
       "verboseProviderError": "Verbose Provider Error",
       "verboseProviderErrorDesc": "When enabled, return detailed error messages when all providers are unavailable (including provider count, rate limit reasons, etc.); when disabled, only return a simple error code.",
+      "enableHttp2": "Enable HTTP/2",
+      "enableHttp2Desc": "When enabled, proxy requests will prefer HTTP/2 protocol. Automatically falls back to HTTP/1.1 on failure.",
       "cleanupSchedule": "Cleanup Schedule",
       "cleanupScheduleDesc": "Select the execution schedule for automatic cleanup",
       "configUpdated": "System settings updated. The page will refresh to apply currency display changes.",
@@ -562,6 +564,7 @@
       "getKeyFailed": "Failed to get key",
       "keyCopied": "Key copied to clipboard",
       "copyFailed": "Copy failed",
+      "clipboardUnavailable": "Clipboard access is blocked in this environment. Select and copy the key manually.",
       "resetCircuitSuccess": "Circuit breaker reset",
       "resetCircuitSuccessDesc": "Provider \"{name}\" circuit breaker status cleared",
       "resetCircuitFailed": "Failed to reset circuit breaker",
@@ -822,7 +825,7 @@
       "baseUrlPlaceholder": "e.g. https://open.bigmodel.cn/api/anthropic",
       "baseUrlRequired": "Please fill in provider URL first",
       "circuitBreakerConfig": "Circuit Breaker Configuration",
-      "circuitBreakerConfigSummary": "{failureThreshold} failures / {openDuration} min circuit break / {successThreshold} successes to recover",
+      "circuitBreakerConfigSummary": "{failureThreshold} failures / {openDuration} min circuit break / {successThreshold} successes to recover / {maxRetryAttempts} attempts per provider",
       "circuitBreakerDesc": "Auto circuit break on consecutive failures to avoid overall service quality impact",
       "clearSearch": "Clear search",
       "codexInstructions": "Codex Instructions Policy",
@@ -1163,7 +1166,7 @@
         },
         "circuitBreaker": {
           "title": "Circuit Breaker",
-          "summary": "{failureThreshold} failures / {openDuration} min break / {successThreshold} successes to recover",
+          "summary": "{failureThreshold} failures / {openDuration} min break / {successThreshold} successes to recover / {maxRetryAttempts} attempts per provider",
           "desc": "Automatically break on consecutive failures to protect overall service quality",
           "failureThreshold": {
             "label": "Failure Threshold",
@@ -1179,6 +1182,11 @@
             "label": "Recovery Threshold",
             "placeholder": "2",
             "desc": "Number of successes in half-open to fully recover"
+          },
+          "maxRetryAttempts": {
+            "label": "Max Attempts Per Provider",
+            "placeholder": "2",
+            "desc": "Total tries (including the first call) before switching providers. Leave empty to use the system default."
           }
         },
         "proxy": {

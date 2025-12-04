@@ -732,6 +732,84 @@ export async function sumUserCostToday(userId: number): Promise<number> {
 }
 
 /**
+ * 查询 Key 历史总消费（通过 Key ID）
+ * 用于显示 Key 的历史总消费统计
+ * @param keyId - Key 的数据库 ID
+ * @param maxAgeDays - 最大查询天数，默认 365 天（避免全表扫描）
+ */
+export async function sumKeyTotalCostById(
+  keyId: number,
+  maxAgeDays: number = 365
+): Promise<number> {
+  // 先查询 key 字符串
+  const keyRecord = await db
+    .select({ key: keys.key })
+    .from(keys)
+    .where(eq(keys.id, keyId))
+    .limit(1);
+
+  if (!keyRecord || keyRecord.length === 0) return 0;
+
+  return sumKeyTotalCost(keyRecord[0].key, maxAgeDays);
+}
+
+/**
+ * 查询 Key 历史总消费（带时间边界优化）
+ * 用于总消费限额检查
+ * @param keyHash - API Key 的哈希值
+ * @param maxAgeDays - 最大查询天数，默认 365 天（避免全表扫描）
+ */
+export async function sumKeyTotalCost(keyHash: string, maxAgeDays: number = 365): Promise<number> {
+  // Validate maxAgeDays - use default 365 for invalid values
+  const validMaxAgeDays =
+    Number.isFinite(maxAgeDays) && maxAgeDays > 0 ? Math.floor(maxAgeDays) : 365;
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - validMaxAgeDays);
+
+  const result = await db
+    .select({ total: sql<number>`COALESCE(SUM(${messageRequest.costUsd}), 0)` })
+    .from(messageRequest)
+    .where(
+      and(
+        eq(messageRequest.key, keyHash),
+        isNull(messageRequest.deletedAt),
+        gte(messageRequest.createdAt, cutoffDate)
+      )
+    );
+
+  return Number(result[0]?.total || 0);
+}
+
+/**
+ * 查询用户历史总消费（所有 Key 累计，带时间边界优化）
+ * 用于总消费限额检查
+ * @param userId - 用户 ID
+ * @param maxAgeDays - 最大查询天数，默认 365 天（避免全表扫描）
+ */
+export async function sumUserTotalCost(userId: number, maxAgeDays: number = 365): Promise<number> {
+  // Validate maxAgeDays - use default 365 for invalid values
+  const validMaxAgeDays =
+    Number.isFinite(maxAgeDays) && maxAgeDays > 0 ? Math.floor(maxAgeDays) : 365;
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - validMaxAgeDays);
+
+  const result = await db
+    .select({ total: sql<number>`COALESCE(SUM(${messageRequest.costUsd}), 0)` })
+    .from(messageRequest)
+    .where(
+      and(
+        eq(messageRequest.userId, userId),
+        isNull(messageRequest.deletedAt),
+        gte(messageRequest.createdAt, cutoffDate)
+      )
+    );
+
+  return Number(result[0]?.total || 0);
+}
+
+/**
  * 查询 Key 在指定时间范围内的消费总和
  * 用于 Key 层限额检查（Redis 降级）
  */
