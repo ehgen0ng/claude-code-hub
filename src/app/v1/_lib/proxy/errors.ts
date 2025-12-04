@@ -420,7 +420,7 @@ export class ProxyError extends Error {
     // Part 1: Provider 信息 + 状态码
     if (this.upstreamError?.providerName) {
       parts.push(
-        `Provider ${this.upstreamError.providerName} returned ${this.statusCode}: ${this.message}`
+        `Provider returned ${this.statusCode}: ${this.message}`
       );
     } else {
       parts.push(this.message);
