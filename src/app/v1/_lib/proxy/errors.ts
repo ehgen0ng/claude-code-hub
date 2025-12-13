@@ -421,7 +421,9 @@ export class ProxyError extends Error {
 
     // Part 1: Provider 信息 + 状态码
     if (this.upstreamError?.providerName) {
-      parts.push(`Provider returned ${this.statusCode}: ${this.message}`);
+      parts.push(
+        `Provider ${this.upstreamError.providerName} returned ${this.statusCode}: ${this.message}`
+      );
     } else {
       parts.push(this.message);
     }
@@ -694,7 +696,7 @@ export class EmptyResponseError extends Error {
       no_output_tokens: "Response has no output tokens",
       missing_content: "Response is missing content field",
     };
-    super(`Empty response from provider: ${reasonMessages[reason]}`);
+    super(`Empty response from provider ${providerName}: ${reasonMessages[reason]}`);
     this.name = "EmptyResponseError";
   }
 
