@@ -74,6 +74,9 @@ export function adjustTSeriesUsage(
 
   if (isHaikuModel(model)) {
     // Haiku: 缺失缓存字段时补 0
+    if (usage.cache_creation_input_tokens != null) {
+      return usage;
+    }
     const cacheCreation = usage.cache_creation_5m_input_tokens ?? 0;
     return {
       ...usage,
@@ -85,6 +88,11 @@ export function adjustTSeriesUsage(
   }
 
   if (isSonnetOrOpusModel(model)) {
+    // 缺失缓存字段才处理
+    if (usage.cache_creation_input_tokens != null) {
+      return usage;
+    }
+
     const originalInput = usage.input_tokens ?? 0;
 
     // 输入验证：input_tokens 不足时直接返回原值
