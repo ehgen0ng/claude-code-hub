@@ -8,9 +8,9 @@ const CACHE_CONFIG = {
   NEW_INPUT_MAX: 15,
   // 会话复用时的缓存分配策略
   REUSE_SCENARIOS: [
-    { threshold: 0.1, writeRatio: 0.7, variance: 0.1 },   // 10%: 约 70% 写入
-    { threshold: 0.3, writeRatio: 0.9, variance: 0.05 },  // 20%: 约 90% 写入
-    { threshold: 1.0, writeRatio: 0.3, variance: 0.1 },   // 70%: 约 30% 写入
+    { threshold: 0.1, writeRatio: 0.7, variance: 0.1 }, // 10%: 约 70% 写入
+    { threshold: 0.3, writeRatio: 0.9, variance: 0.05 }, // 20%: 约 90% 写入
+    { threshold: 1.0, writeRatio: 0.3, variance: 0.1 }, // 70%: 约 30% 写入
   ],
 } as const;
 
