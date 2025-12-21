@@ -20,6 +20,7 @@ import { GeminiAdapter } from "../gemini/adapter";
 import type { GeminiResponse } from "../gemini/types";
 import { isClientAbortError } from "./errors";
 import { mapClientFormatToTransformer, mapProviderTypeToTransformer } from "./format-mapper";
+import { adjustTSeriesUsage } from "./others";
 import type { ProxySession } from "./session";
 
 export type UsageMetrics = {
@@ -267,7 +268,7 @@ export class ProxyResponseHandler {
 
         const usageResult = parseUsageFromResponseText(responseText, provider.providerType);
         usageRecord = usageResult.usageRecord;
-        usageMetrics = usageResult.usageMetrics;
+        usageMetrics = adjustTSeriesUsage(usageResult.usageMetrics, provider, session);
 
         // Codex: Extract prompt_cache_key and update session binding
         if (provider.providerType === "codex" && session.sessionId && provider.id) {
@@ -828,7 +829,7 @@ export class ProxyResponseHandler {
         tracker.endRequest(messageContext.user.id, messageContext.id);
 
         const usageResult = parseUsageFromResponseText(allContent, provider.providerType);
-        usageForCost = usageResult.usageMetrics;
+        usageForCost = adjustTSeriesUsage(usageResult.usageMetrics, provider, session);
 
         // Codex: Extract prompt_cache_key from SSE events and update session binding
         if (provider.providerType === "codex" && session.sessionId && provider.id) {
