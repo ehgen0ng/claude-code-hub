@@ -76,8 +76,9 @@ export function adjustTSeriesUsage(
     // Haiku: 缺失缓存字段时补 0
     return {
       ...usage,
-      cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+      cache_creation_5m_input_tokens: usage.cache_creation_5m_input_tokens ?? 0,
       cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+      cache_ttl: "5m",
     };
   }
 
@@ -97,8 +98,9 @@ export function adjustTSeriesUsage(
       return {
         ...usage,
         input_tokens: newInput,
-        cache_creation_input_tokens: remaining,
+        cache_creation_5m_input_tokens: remaining,
         cache_read_input_tokens: 0,
+        cache_ttl: "5m",
       };
     }
 
@@ -119,8 +121,9 @@ export function adjustTSeriesUsage(
     return {
       ...usage,
       input_tokens: newInput,
-      cache_creation_input_tokens: cacheWrite,
+      cache_creation_5m_input_tokens: cacheWrite,
       cache_read_input_tokens: cacheRead,
+      cache_ttl: "5m",
     };
   }
 
