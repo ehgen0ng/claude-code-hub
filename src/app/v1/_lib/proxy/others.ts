@@ -91,8 +91,7 @@ export function adjustTSeriesUsage(
     // 缺失缓存字段，或缓存字段都为 0 时才处理
     const hasCacheField = usage.cache_creation_input_tokens != null;
     const allCacheZero =
-      (usage.cache_creation_input_tokens ?? 0) === 0 &&
-      (usage.cache_read_input_tokens ?? 0) === 0;
+      (usage.cache_creation_input_tokens ?? 0) === 0 && (usage.cache_read_input_tokens ?? 0) === 0;
 
     if (hasCacheField && !allCacheZero) {
       return usage;
