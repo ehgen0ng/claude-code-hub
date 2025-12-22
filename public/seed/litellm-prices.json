@@ -381,6 +381,7 @@
         "supports_video_input": true,
         "supports_vision": true
     },
+
     "amazon.nova-micro-v1:0": {
         "input_cost_per_token": 3.5e-08,
         "litellm_provider": "bedrock_converse",
@@ -2814,7 +2815,7 @@
             "/v1/audio/transcriptions"
         ]
     },
-    "azure/gpt-5.1-2025-11-13": {
+   "azure/gpt-5.1-2025-11-13": {
         "cache_read_input_token_cost": 1.25e-07,
         "cache_read_input_token_cost_priority": 2.5e-07,
         "input_cost_per_token": 1.25e-06,
@@ -2850,7 +2851,7 @@
         "supports_service_tier": true,
         "supports_vision": true
     },
-    "azure/gpt-5.1-chat-2025-11-13": {
+   "azure/gpt-5.1-chat-2025-11-13": {
         "cache_read_input_token_cost": 1.25e-07,
         "cache_read_input_token_cost_priority": 2.5e-07,
         "input_cost_per_token": 1.25e-06,
@@ -2885,7 +2886,7 @@
         "supports_tool_choice": false,
         "supports_vision": true
     },
-    "azure/gpt-5.1-codex-2025-11-13": {
+   "azure/gpt-5.1-codex-2025-11-13": {
         "cache_read_input_token_cost": 1.25e-07,
         "cache_read_input_token_cost_priority": 2.5e-07,
         "input_cost_per_token": 1.25e-06,
@@ -5166,7 +5167,7 @@
         "mode": "rerank",
         "output_cost_per_token": 0.0
     },
-    "azure_ai/deepseek-v3.2": {
+        "azure_ai/deepseek-v3.2": {
         "input_cost_per_token": 5.8e-07,
         "litellm_provider": "azure_ai",
         "max_input_tokens": 163840,
@@ -21451,7 +21452,7 @@
         "output_cost_per_token": 0.0,
         "supports_function_calling": true
     },
-    "ollama/deepseek-v3.1:671b-cloud": {
+    "ollama/deepseek-v3.1:671b-cloud" : {
         "input_cost_per_token": 0.0,
         "litellm_provider": "ollama",
         "max_input_tokens": 163840,
@@ -21461,7 +21462,7 @@
         "output_cost_per_token": 0.0,
         "supports_function_calling": true
     },
-    "ollama/gpt-oss:120b-cloud": {
+    "ollama/gpt-oss:120b-cloud" : {
         "input_cost_per_token": 0.0,
         "litellm_provider": "ollama",
         "max_input_tokens": 131072,
@@ -21471,7 +21472,7 @@
         "output_cost_per_token": 0.0,
         "supports_function_calling": true
     },
-    "ollama/gpt-oss:20b-cloud": {
+    "ollama/gpt-oss:20b-cloud" : {
         "input_cost_per_token": 0.0,
         "litellm_provider": "ollama",
         "max_input_tokens": 131072,
@@ -24291,6 +24292,7 @@
         "supports_reasoning": true,
         "source": "https://cloud.sambanova.ai/plans/pricing"
     },
+
     "snowflake/claude-3-5-sonnet": {
         "litellm_provider": "snowflake",
         "max_input_tokens": 18000,
@@ -24465,185 +24467,139 @@
         "litellm_provider": "stability",
         "mode": "image_generation",
         "output_cost_per_image": 0.065,
-        "supported_endpoints": [
-            "/v1/images/generations"
-        ]
+        "supported_endpoints": ["/v1/images/generations"]
     },
     "stability/sd3-large": {
         "litellm_provider": "stability",
         "mode": "image_generation",
         "output_cost_per_image": 0.065,
-        "supported_endpoints": [
-            "/v1/images/generations"
-        ]
+        "supported_endpoints": ["/v1/images/generations"]
     },
     "stability/sd3-large-turbo": {
         "litellm_provider": "stability",
         "mode": "image_generation",
         "output_cost_per_image": 0.04,
-        "supported_endpoints": [
-            "/v1/images/generations"
-        ]
+        "supported_endpoints": ["/v1/images/generations"]
     },
     "stability/sd3-medium": {
         "litellm_provider": "stability",
         "mode": "image_generation",
         "output_cost_per_image": 0.035,
-        "supported_endpoints": [
-            "/v1/images/generations"
-        ]
+        "supported_endpoints": ["/v1/images/generations"]
     },
     "stability/sd3.5-large": {
         "litellm_provider": "stability",
         "mode": "image_generation",
         "output_cost_per_image": 0.065,
-        "supported_endpoints": [
-            "/v1/images/generations"
-        ]
+        "supported_endpoints": ["/v1/images/generations"]
     },
     "stability/sd3.5-large-turbo": {
         "litellm_provider": "stability",
         "mode": "image_generation",
         "output_cost_per_image": 0.04,
-        "supported_endpoints": [
-            "/v1/images/generations"
-        ]
+        "supported_endpoints": ["/v1/images/generations"]
     },
     "stability/sd3.5-medium": {
         "litellm_provider": "stability",
         "mode": "image_generation",
         "output_cost_per_image": 0.035,
-        "supported_endpoints": [
-            "/v1/images/generations"
-        ]
+        "supported_endpoints": ["/v1/images/generations"]
     },
     "stability/stable-image-ultra": {
         "litellm_provider": "stability",
         "mode": "image_generation",
         "output_cost_per_image": 0.08,
-        "supported_endpoints": [
-            "/v1/images/generations"
-        ]
+        "supported_endpoints": ["/v1/images/generations"]
     },
     "stability/inpaint": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.005,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/outpaint": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.004,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/erase": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.005,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/search-and-replace": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.005,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/search-and-recolor": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.005,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/remove-background": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.005,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/replace-background-and-relight": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.008,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/sketch": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.005,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/structure": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.005,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/style": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.005,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/style-transfer": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.008,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/fast": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.002,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/conservative": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.04,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/creative": {
         "litellm_provider": "stability",
         "mode": "image_edit",
         "output_cost_per_image": 0.06,
-        "supported_endpoints": [
-            "/v1/images/edits"
-        ]
+        "supported_endpoints": ["/v1/images/edits"]
     },
     "stability/stable-image-core": {
         "litellm_provider": "stability",
         "mode": "image_generation",
         "output_cost_per_image": 0.03,
-        "supported_endpoints": [
-            "/v1/images/generations"
-        ]
+        "supported_endpoints": ["/v1/images/generations"]
     },
     "stability.sd3-5-large-v1:0": {
         "litellm_provider": "bedrock",
