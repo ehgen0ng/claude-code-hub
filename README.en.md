@@ -36,6 +36,34 @@ Cubence offers special discount coupons for users of CCH: when purchasing with t
 </tr>
 </table>
 
+<table>
+<tr>
+<td width="200">
+<a href="https://privnode.com/with-cch?utm_source=refLink">
+<img src="public/readme/privnode.png" alt="Privnode Logo" width="180"/>
+</a>
+</td>
+<td>
+<b>💎 Special Offer</b>: <a href="https://privnode.com/with-cch?utm_source=refLink">Privnode</a> is an affordable AI API aggregation platform providing one-stop relay services for mainstream models like Claude and Codex, serving developers and teams with reliable stability and competitive pricing.<br/>
+Use code <code>WITHCCH</code> for <b>15% off</b> → <a href="https://privnode.com/with-cch?utm_source=refLink">Visit Now</a>
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="200">
+<a href="https://www.packyapi.com/register?aff=withcch">
+<img src="public/readme/packycode.png" alt="PackyCode Logo" width="180"/>
+</a>
+</td>
+<td>
+<b>💎 Special Offer</b>: Thanks to <a href="https://www.packyapi.com/register?aff=withcch">PackyCode</a> for sponsoring this project! PackyCode is a stable and efficient API relay service provider, offering relay services for Claude Code, Codex, Gemini and more.<br/>
+PackyCode offers a special discount for users of this software. Register via this link and enter code <code>WITHCCH</code> when recharging to enjoy <b>10% off</b> → <a href="https://www.packyapi.com/register?aff=withcch">Visit Now</a>
+</td>
+</tr>
+</table>
+
 ## ✨ Core Highlights
 
 - 🤖 **Intelligent load balancing**: Weight + priority + grouping scheduler with built-in circuit breaker and up to three failover retries to keep requests stable.
@@ -246,6 +274,7 @@ Docker Compose is the **preferred deployment method** — it automatically provi
 | `DSN`                                      | -                        | PostgreSQL connection string, e.g., `postgres://user:pass@host:5432/db`.                             |
 | `AUTO_MIGRATE`                             | `true`                   | Executes Drizzle migrations on startup; consider disabling in production for manual control.         |
 | `REDIS_URL`                                | `redis://localhost:6379` | Redis endpoint, supports `rediss://` for TLS providers.                                              |
+| `REDIS_TLS_REJECT_UNAUTHORIZED`            | `true`                   | Validate Redis TLS certificates; set `false` to skip (for self-signed/shared certs).                 |
 | `ENABLE_RATE_LIMIT`                        | `true`                   | Toggles multi-dimensional rate limiting; Fail-Open handles Redis outages gracefully.                 |
 | `SESSION_TTL`                              | `300`                    | Session cache window (seconds) that drives vendor reuse.                                             |
 | `ENABLE_SECURE_COOKIES`                    | `true`                   | Browsers require HTTPS for Secure cookies; set to `false` when serving plain HTTP outside localhost. |

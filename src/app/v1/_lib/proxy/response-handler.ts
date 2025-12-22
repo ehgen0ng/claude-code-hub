@@ -33,6 +33,28 @@ export type UsageMetrics = {
   cache_read_input_tokens?: number;
 };
 
+/**
+ * 清理 Response headers 中的传输相关 header
+ *
+ * 原因：Bun 的 Response API 在接收 ReadableStream 或修改后的 body 时，
+ * 会自动添加 Transfer-Encoding: chunked 和 Content-Length，
+ * 如果不清理原始 headers 中的这些字段，会导致重复 header 错误。
+ *
+ * Node.js 运行时会智能去重，但 Bun 不会，所以需要手动清理。
+ *
+ * @param headers - 原始响应 headers
+ * @returns 清理后的 headers
+ */
+function cleanResponseHeaders(headers: Headers): Headers {
+  const cleaned = new Headers(headers);
+
+  // 删除传输相关 headers，让 Response API 自动管理
+  cleaned.delete("transfer-encoding"); // Bun 会根据 body 类型自动添加
+  cleaned.delete("content-length"); // body 改变后长度无效，Response API 会重新计算
+
+  return cleaned;
+}
+
 export class ProxyResponseHandler {
   static async dispatch(session: ProxySession, response: Response): Promise<Response> {
     const contentType = response.headers.get("content-type") || "";
@@ -153,10 +175,11 @@ export class ProxyResponseHandler {
             }
           );
 
+          // ⭐ 清理传输 headers（body 已从流转为 JSON 字符串）
           finalResponse = new Response(JSON.stringify(transformed), {
             status: response.status,
             statusText: response.statusText,
-            headers: new Headers(response.headers),
+            headers: cleanResponseHeaders(response.headers),
           });
         } catch (error) {
           logger.error("[ResponseHandler] Failed to transform Gemini non-stream response:", error);
@@ -187,11 +210,12 @@ export class ProxyResponseHandler {
           model: session.request.model,
         });
 
+        // ⭐ 清理传输 headers（body 已修改，原始传输信息无效）
         // 构建新的响应
         finalResponse = new Response(JSON.stringify(transformed), {
           status: response.status,
           statusText: response.statusText,
-          headers: new Headers(response.headers),
+          headers: cleanResponseHeaders(response.headers),
         });
       } catch (error) {
         logger.error("[ResponseHandler] Failed to transform response:", error);
@@ -1178,10 +1202,12 @@ export class ProxyResponseHandler {
       });
     }
 
+    // ⭐ 修复 Bun 运行时的 Transfer-Encoding 重复问题
+    // 清理上游的传输 headers，让 Response API 自动管理
     return new Response(clientStream, {
       status: response.status,
       statusText: response.statusText,
-      headers: new Headers(response.headers),
+      headers: cleanResponseHeaders(response.headers),
     });
   }
 }
@@ -1255,6 +1281,25 @@ function extractUsageMetrics(value: unknown): UsageMetrics | null {
     }
   }
 
+  // 兼容部分 relay / 旧字段命名：claude_cache_creation_5_m_tokens / claude_cache_creation_1_h_tokens
+  // 仅在标准字段缺失时使用，避免重复统计
+  if (
+    result.cache_creation_5m_input_tokens === undefined &&
+    typeof usage.claude_cache_creation_5_m_tokens === "number"
+  ) {
+    result.cache_creation_5m_input_tokens = usage.claude_cache_creation_5_m_tokens;
+    cacheCreationDetailedTotal += usage.claude_cache_creation_5_m_tokens;
+    hasAny = true;
+  }
+  if (
+    result.cache_creation_1h_input_tokens === undefined &&
+    typeof usage.claude_cache_creation_1_h_tokens === "number"
+  ) {
+    result.cache_creation_1h_input_tokens = usage.claude_cache_creation_1_h_tokens;
+    cacheCreationDetailedTotal += usage.claude_cache_creation_1_h_tokens;
+    hasAny = true;
+  }
+
   if (result.cache_creation_input_tokens === undefined && cacheCreationDetailedTotal > 0) {
     result.cache_creation_input_tokens = cacheCreationDetailedTotal;
   }
@@ -1291,7 +1336,7 @@ function extractUsageMetrics(value: unknown): UsageMetrics | null {
   return hasAny ? result : null;
 }
 
-function parseUsageFromResponseText(
+export function parseUsageFromResponseText(
   responseText: string,
   providerType: string | null | undefined
 ): {
@@ -1379,11 +1424,29 @@ function parseUsageFromResponseText(
     const events = parseSSEData(responseText);
 
     // Claude SSE 特殊处理：
-    // - message_start 包含 input tokens 和缓存创建字段（5m/1h 区分计费）
-    // - message_delta 包含最终的 output_tokens
-    // 需要分别提取并合并
+    // - message_delta 通常包含更完整的 usage（应优先使用）
+    // - message_start 可能包含 cache_creation 的 TTL 细分字段（作为缺失字段的补充）
     let messageStartUsage: UsageMetrics | null = null;
-    let messageDeltaOutputTokens: number | null = null;
+    let messageDeltaUsage: UsageMetrics | null = null;
+
+    const mergeUsageMetrics = (base: UsageMetrics | null, patch: UsageMetrics): UsageMetrics => {
+      if (!base) {
+        return { ...patch };
+      }
+
+      return {
+        input_tokens: patch.input_tokens ?? base.input_tokens,
+        output_tokens: patch.output_tokens ?? base.output_tokens,
+        cache_creation_input_tokens:
+          patch.cache_creation_input_tokens ?? base.cache_creation_input_tokens,
+        cache_creation_5m_input_tokens:
+          patch.cache_creation_5m_input_tokens ?? base.cache_creation_5m_input_tokens,
+        cache_creation_1h_input_tokens:
+          patch.cache_creation_1h_input_tokens ?? base.cache_creation_1h_input_tokens,
+        cache_ttl: patch.cache_ttl ?? base.cache_ttl,
+        cache_read_input_tokens: patch.cache_read_input_tokens ?? base.cache_read_input_tokens,
+      };
+    };
 
     for (const event of events) {
       if (typeof event.data !== "object" || !event.data) {
@@ -1392,37 +1455,54 @@ function parseUsageFromResponseText(
 
       const data = event.data as Record<string, unknown>;
 
-      // Claude message_start format: data.message.usage
-      // 提取 input tokens 和缓存字段
-      if (event.event === "message_start" && data.message && typeof data.message === "object") {
-        const messageObj = data.message as Record<string, unknown>;
-        if (messageObj.usage && typeof messageObj.usage === "object") {
-          const extracted = extractUsageMetrics(messageObj.usage);
+      if (event.event === "message_start") {
+        // Claude message_start format: data.message.usage
+        // 部分 relay 可能是 data.usage（无 message 包裹）
+        let usageValue: unknown = null;
+        if (data.message && typeof data.message === "object") {
+          const messageObj = data.message as Record<string, unknown>;
+          usageValue = messageObj.usage;
+        }
+        if (!usageValue) {
+          usageValue = data.usage;
+        }
+
+        if (usageValue && typeof usageValue === "object") {
+          const extracted = extractUsageMetrics(usageValue);
           if (extracted) {
-            messageStartUsage = extracted;
+            messageStartUsage = mergeUsageMetrics(messageStartUsage, extracted);
             logger.debug("[ResponseHandler] Extracted usage from message_start", {
-              source: "sse.message_start.message.usage",
+              source:
+                usageValue === data.usage
+                  ? "sse.message_start.usage"
+                  : "sse.message_start.message.usage",
               usage: extracted,
             });
           }
         }
       }
 
-      // Claude message_delta format: data.usage.output_tokens
-      // 提取最终的 output_tokens（在流结束时）
-      if (event.event === "message_delta" && data.usage && typeof data.usage === "object") {
-        const deltaUsage = data.usage as Record<string, unknown>;
-        if (typeof deltaUsage.output_tokens === "number") {
-          messageDeltaOutputTokens = deltaUsage.output_tokens;
-          logger.debug("[ResponseHandler] Extracted output_tokens from message_delta", {
-            source: "sse.message_delta.usage.output_tokens",
-            outputTokens: messageDeltaOutputTokens,
-          });
+      if (event.event === "message_delta") {
+        // Claude message_delta format: data.usage
+        let usageValue: unknown = data.usage;
+        if (!usageValue && data.delta && typeof data.delta === "object") {
+          usageValue = (data.delta as Record<string, unknown>).usage;
+        }
+
+        if (usageValue && typeof usageValue === "object") {
+          const extracted = extractUsageMetrics(usageValue);
+          if (extracted) {
+            messageDeltaUsage = mergeUsageMetrics(messageDeltaUsage, extracted);
+            logger.debug("[ResponseHandler] Extracted usage from message_delta", {
+              source: "sse.message_delta.usage",
+              usage: extracted,
+            });
+          }
         }
       }
 
       // 非 Claude 格式的 SSE 处理（Gemini 等）
-      if (!messageStartUsage && !messageDeltaOutputTokens) {
+      if (!messageStartUsage && !messageDeltaUsage) {
         // Standard usage fields (data.usage)
         applyUsageValue(data.usage, `sse.${event.event}.usage`);
 
@@ -1438,20 +1518,17 @@ function parseUsageFromResponseText(
       }
     }
 
-    // 合并 Claude SSE 的 message_start 和 message_delta 数据
-    if (messageStartUsage) {
-      // 使用 message_delta 中的 output_tokens 覆盖 message_start 中的值
-      if (messageDeltaOutputTokens !== null) {
-        messageStartUsage.output_tokens = messageDeltaOutputTokens;
-        logger.debug(
-          "[ResponseHandler] Merged output_tokens from message_delta into message_start usage",
-          {
-            finalOutputTokens: messageDeltaOutputTokens,
-          }
-        );
+    // Claude SSE 合并规则：优先使用 message_delta，缺失字段再回退到 message_start
+    const mergedClaudeUsage = (() => {
+      if (messageDeltaUsage && messageStartUsage) {
+        return mergeUsageMetrics(messageStartUsage, messageDeltaUsage);
       }
-      usageMetrics = adjustUsageForProviderType(messageStartUsage, providerType);
-      usageRecord = messageStartUsage as unknown as Record<string, unknown>;
+      return messageDeltaUsage ?? messageStartUsage;
+    })();
+
+    if (mergedClaudeUsage) {
+      usageMetrics = adjustUsageForProviderType(mergedClaudeUsage, providerType);
+      usageRecord = mergedClaudeUsage as unknown as Record<string, unknown>;
       logger.debug("[ResponseHandler] Final merged usage from Claude SSE", {
         providerType,
         usage: usageMetrics,
@@ -1766,11 +1843,22 @@ async function trackCostToRedis(session: ProxySession, usage: UsageMetrics | nul
       keyResetMode: key.dailyResetMode,
       providerResetTime: provider.dailyResetTime,
       providerResetMode: provider.dailyResetMode,
+      requestId: messageContext.id,
+      createdAtMs: messageContext.createdAt.getTime(),
     }
   );
 
   // 新增：追踪用户层每日消费
-  await RateLimitService.trackUserDailyCost(user.id, costFloat);
+  await RateLimitService.trackUserDailyCost(
+    user.id,
+    costFloat,
+    user.dailyResetTime,
+    user.dailyResetMode,
+    {
+      requestId: messageContext.id,
+      createdAtMs: messageContext.createdAt.getTime(),
+    }
+  );
 
   // 刷新 session 时间戳（滑动窗口）
   void SessionTracker.refreshSession(session.sessionId, key.id, provider.id).catch((error) => {
@@ -1805,6 +1893,31 @@ async function persistRequestFailure(options: {
   const errorMessage = formatProcessingError(error);
   const duration = Date.now() - session.startTime;
 
+  // 提取完整错误信息用于排查（限制长度防止异常大的错误信息）
+  const MAX_ERROR_STACK_LENGTH = 8192; // 8KB，足够容纳大多数堆栈信息
+  const MAX_ERROR_CAUSE_LENGTH = 4096; // 4KB，足够容纳 JSON 序列化的错误原因
+
+  let errorStack = error instanceof Error ? error.stack : undefined;
+  if (errorStack && errorStack.length > MAX_ERROR_STACK_LENGTH) {
+    errorStack = `${errorStack.substring(0, MAX_ERROR_STACK_LENGTH)}\n...[truncated]`;
+  }
+
+  let errorCause: string | undefined;
+  if (error instanceof Error && (error as NodeJS.ErrnoException).cause) {
+    try {
+      // 序列化错误原因链，保留所有属性
+      const cause = (error as NodeJS.ErrnoException).cause;
+      errorCause = JSON.stringify(cause, Object.getOwnPropertyNames(cause as object));
+    } catch {
+      // 如果序列化失败，使用简单字符串
+      errorCause = String((error as NodeJS.ErrnoException).cause);
+    }
+    // 截断过长的错误原因
+    if (errorCause && errorCause.length > MAX_ERROR_CAUSE_LENGTH) {
+      errorCause = `${errorCause.substring(0, MAX_ERROR_CAUSE_LENGTH)}...[truncated]`;
+    }
+  }
+
   try {
     // 更新请求持续时间
     await updateMessageRequestDuration(messageContext.id, duration);
@@ -1813,6 +1926,8 @@ async function persistRequestFailure(options: {
     await updateMessageRequestDetails(messageContext.id, {
       statusCode,
       errorMessage,
+      errorStack,
+      errorCause,
       providerChain: session.getProviderChain(),
       model: session.getCurrentModel() ?? undefined,
       providerId: session.provider?.id, // ⭐ 更新最终供应商ID（重试切换后）

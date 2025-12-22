@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
@@ -24,6 +25,7 @@ import { UsageLogsTable } from "./usage-logs-table";
 
 interface UsageLogsSectionProps {
   initialData?: MyUsageLogsResult | null;
+  loading?: boolean;
   autoRefreshSeconds?: number;
 }
 
@@ -40,56 +42,74 @@ interface Filters {
 
 export function UsageLogsSection({
   initialData = null,
+  loading = false,
   autoRefreshSeconds,
 }: UsageLogsSectionProps) {
   const t = useTranslations("myUsage.logs");
   const tDashboard = useTranslations("dashboard");
+  const tCommon = useTranslations("common");
   const [models, setModels] = useState<string[]>([]);
   const [endpoints, setEndpoints] = useState<string[]>([]);
-  const [filters, setFilters] = useState<Filters>({ page: 1 });
+  const [isModelsLoading, setIsModelsLoading] = useState(true);
+  const [isEndpointsLoading, setIsEndpointsLoading] = useState(true);
+  const [draftFilters, setDraftFilters] = useState<Filters>({ page: 1 });
+  const [appliedFilters, setAppliedFilters] = useState<Filters>({ page: 1 });
   const [data, setData] = useState<MyUsageLogsResult | null>(initialData);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  // Sync initialData from parent when it becomes available
+  // (useState only uses initialData on first mount, not on subsequent updates)
   useEffect(() => {
-    const loadOptions = async () => {
-      const [modelsResult, endpointsResult] = await Promise.all([
-        getMyAvailableModels(),
-        getMyAvailableEndpoints(),
-      ]);
-      if (modelsResult.ok && modelsResult.data) {
-        setModels(modelsResult.data);
-      }
-      if (endpointsResult.ok && endpointsResult.data) {
-        setEndpoints(endpointsResult.data);
-      }
-    };
-    loadOptions();
+    if (initialData && !data) {
+      setData(initialData);
+    }
+  }, [initialData, data]);
+
+  useEffect(() => {
+    setIsModelsLoading(true);
+    setIsEndpointsLoading(true);
+
+    void getMyAvailableModels()
+      .then((modelsResult) => {
+        if (modelsResult.ok && modelsResult.data) {
+          setModels(modelsResult.data);
+        }
+      })
+      .finally(() => setIsModelsLoading(false));
+
+    void getMyAvailableEndpoints()
+      .then((endpointsResult) => {
+        if (endpointsResult.ok && endpointsResult.data) {
+          setEndpoints(endpointsResult.data);
+        }
+      })
+      .finally(() => setIsEndpointsLoading(false));
   }, []);
 
   const loadLogs = useCallback(
-    (resetPage = false) => {
+    (nextFilters: Filters) => {
       startTransition(async () => {
-        const nextFilters = resetPage ? { ...filters, page: 1 } : filters;
         const result = await getMyUsageLogs(nextFilters);
         if (result.ok && result.data) {
           setData(result.data);
-          setFilters(nextFilters);
+          setAppliedFilters(nextFilters);
           setError(null);
         } else {
           setError(!result.ok && "error" in result ? result.error : t("loadFailed"));
         }
       });
     },
-    [filters, t]
+    [t]
   );
 
   useEffect(() => {
     // initial load if not provided
-    if (!initialData) {
-      loadLogs(true);
+    if (data) return;
+    if (!initialData && !loading) {
+      loadLogs({ page: 1 });
     }
-  }, [initialData, loadLogs]);
+  }, [data, initialData, loading, loadLogs]);
 
   // Auto-refresh polling (only when on page 1 to avoid disrupting history browsing)
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -108,8 +128,8 @@ export function UsageLogsSection({
 
       intervalRef.current = setInterval(() => {
         // Only auto-refresh when on page 1
-        if (filters.page === 1) {
-          loadLogs(false);
+        if ((appliedFilters.page ?? 1) === 1) {
+          loadLogs(appliedFilters);
         }
       }, pollIntervalMs);
     };
@@ -126,8 +146,8 @@ export function UsageLogsSection({
         stopPolling();
       } else {
         // Refresh immediately when tab becomes visible (only if on page 1)
-        if (filters.page === 1) {
-          loadLogs(false);
+        if ((appliedFilters.page ?? 1) === 1) {
+          loadLogs(appliedFilters);
         }
         startPolling();
       }
@@ -140,17 +160,19 @@ export function UsageLogsSection({
       stopPolling();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [autoRefreshSeconds, filters.page, loadLogs]);
+  }, [autoRefreshSeconds, appliedFilters, loadLogs]);
 
   const handleFilterChange = (changes: Partial<Filters>) => {
-    setFilters((prev) => ({ ...prev, ...changes, page: 1 }));
+    setDraftFilters((prev) => ({ ...prev, ...changes, page: 1 }));
   };
 
-  const handleApply = () => loadLogs(true);
+  const handleApply = () => {
+    loadLogs({ ...draftFilters, page: 1 });
+  };
 
   const handleReset = () => {
-    setFilters({ page: 1 });
-    loadLogs(true);
+    setDraftFilters({ page: 1 });
+    loadLogs({ page: 1 });
   };
 
   const handleDateRangeChange = (range: { startDate?: string; endDate?: string }) => {
@@ -158,15 +180,11 @@ export function UsageLogsSection({
   };
 
   const handlePageChange = (page: number) => {
-    setFilters((prev) => ({ ...prev, page }));
-    startTransition(async () => {
-      const result = await getMyUsageLogs({ ...filters, page });
-      if (result.ok && result.data) {
-        setData(result.data);
-        setError(null);
-      }
-    });
+    loadLogs({ ...appliedFilters, page });
   };
+
+  const isInitialLoading = loading || (!data && isPending);
+  const isRefreshing = isPending && Boolean(data);
 
   return (
     <Card>
@@ -185,23 +203,26 @@ export function UsageLogsSection({
               {t("filters.startDate")} / {t("filters.endDate")}
             </Label>
             <LogsDateRangePicker
-              startDate={filters.startDate}
-              endDate={filters.endDate}
+              startDate={draftFilters.startDate}
+              endDate={draftFilters.endDate}
               onDateRangeChange={handleDateRangeChange}
             />
           </div>
           <div className="space-y-1.5 lg:col-span-4">
             <Label>{t("filters.model")}</Label>
             <Select
-              value={filters.model ?? "__all__"}
+              value={draftFilters.model ?? "__all__"}
               onValueChange={(value) =>
                 handleFilterChange({
                   model: value === "__all__" ? undefined : value,
                 })
               }
+              disabled={isModelsLoading}
             >
               <SelectTrigger>
-                <SelectValue placeholder={t("filters.allModels")} />
+                <SelectValue
+                  placeholder={isModelsLoading ? tCommon("loading") : t("filters.allModels")}
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">{t("filters.allModels")}</SelectItem>
@@ -216,15 +237,22 @@ export function UsageLogsSection({
           <div className="space-y-1.5 lg:col-span-4">
             <Label>{tDashboard("logs.filters.endpoint")}</Label>
             <Select
-              value={filters.endpoint ?? "__all__"}
+              value={draftFilters.endpoint ?? "__all__"}
               onValueChange={(value) =>
                 handleFilterChange({
                   endpoint: value === "__all__" ? undefined : value,
                 })
               }
+              disabled={isEndpointsLoading}
             >
               <SelectTrigger>
-                <SelectValue placeholder={tDashboard("logs.filters.allEndpoints")} />
+                <SelectValue
+                  placeholder={
+                    isEndpointsLoading
+                      ? tCommon("loading")
+                      : tDashboard("logs.filters.allEndpoints")
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">{tDashboard("logs.filters.allEndpoints")}</SelectItem>
@@ -240,9 +268,9 @@ export function UsageLogsSection({
             <Label>{t("filters.status")}</Label>
             <Select
               value={
-                filters.excludeStatusCode200
+                draftFilters.excludeStatusCode200
                   ? "!200"
-                  : (filters.statusCode?.toString() ?? "__all__")
+                  : (draftFilters.statusCode?.toString() ?? "__all__")
               }
               onValueChange={(value) =>
                 handleFilterChange({
@@ -272,7 +300,7 @@ export function UsageLogsSection({
               type="number"
               min={0}
               inputMode="numeric"
-              value={filters.minRetryCount?.toString() ?? ""}
+              value={draftFilters.minRetryCount?.toString() ?? ""}
               placeholder={tDashboard("logs.filters.minRetryCountPlaceholder")}
               onChange={(e) =>
                 handleFilterChange({
@@ -283,24 +311,33 @@ export function UsageLogsSection({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={handleApply} disabled={isPending}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={handleApply} disabled={isPending || loading}>
             {t("filters.apply")}
           </Button>
-          <Button size="sm" variant="outline" onClick={handleReset} disabled={isPending}>
+          <Button size="sm" variant="outline" onClick={handleReset} disabled={isPending || loading}>
             {t("filters.reset")}
           </Button>
         </div>
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
+        {isRefreshing ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>{tCommon("loading")}</span>
+          </div>
+        ) : null}
+
         <UsageLogsTable
           logs={data?.logs ?? []}
           total={data?.total ?? 0}
-          page={filters.page ?? 1}
+          page={appliedFilters.page ?? 1}
           pageSize={data?.pageSize ?? 20}
           onPageChange={handlePageChange}
           currencyCode={data?.currencyCode}
+          loading={isInitialLoading}
+          loadingLabel={tCommon("loading")}
         />
       </CardContent>
     </Card>

@@ -36,6 +36,34 @@ Cubence 为 CCH 的使用用户提供了特别的优惠折扣：在购买时使�
 </tr>
 </table>
 
+<table>
+<tr>
+<td width="200">
+<a href="https://privnode.com/with-cch?utm_source=refLink">
+<img src="public/readme/privnode.png" alt="Privnode Logo" width="180"/>
+</a>
+</td>
+<td>
+<b>💎 特别优惠</b>：<a href="https://privnode.com/with-cch?utm_source=refLink">Privnode</a> 是一家平价的 AI API 聚合平台，为 Claude、Codex 等主流模型提供一站式中转服务，以良好的稳定性和较高的性价比，服务于开发者与团队的实际需求。<br/>
+使用优惠码 <code>WITHCCH</code> 可获得 <b>15% 折扣</b> → <a href="https://privnode.com/with-cch?utm_source=refLink">立即访问</a>
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="200">
+<a href="https://www.packyapi.com/register?aff=withcch">
+<img src="public/readme/packycode.png" alt="PackyCode Logo" width="180"/>
+</a>
+</td>
+<td>
+<b>💎 特别优惠</b>：感谢 <a href="https://www.packyapi.com/register?aff=withcch">PackyCode</a> 赞助本项目！PackyCode 是一家稳定、高效的 API 中转服务商，提供 Claude Code、Codex、Gemini 等多种中转服务。<br/>
+PackyCode 为本软件的用户提供了特别优惠，使用此链接注册并在充值时填写优惠码 <code>WITHCCH</code>，可享受 <b>9 折优惠</b> → <a href="https://www.packyapi.com/register?aff=withcch">立即访问</a>
+</td>
+</tr>
+</table>
+
 ## ✨ 核心功能 Highlights
 
 - 🤖 **智能负载均衡**：权重 + 优先级 + 分组调度，内置熔断保护与最多 3 次故障转移，保障请求稳定。
@@ -151,8 +179,11 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 - **管理后台**：`http://localhost:23000`（使用 `.env` 中的 `ADMIN_TOKEN` 登录）
 - **API 文档（Scalar UI）**：`http://localhost:23000/api/actions/scalar`
 - **API 文档（Swagger UI）**：`http://localhost:23000/api/actions/docs`
+- **API 认证指南**：[docs/api-authentication-guide.md](docs/api-authentication-guide.md)
 
-> 💡 **提示**：如需修改端口，请编辑 `docker-compose.yml` 中的 `ports` 配置。
+> 💡 **提示**：
+> - 如需修改端口，请编辑 `docker-compose.yml` 中的 `ports` 配置。
+> - 如需通过脚本或编程调用 API，请参考 [API 认证指南](docs/api-authentication-guide.md)。
 
 ## 🖼️ 界面预览 Screenshots
 
@@ -246,6 +277,7 @@ Docker Compose 是**首选部署方式**，自动配置数据库、Redis 和应�
 | `DSN`                                      | -                        | PostgreSQL 连接串，如 `postgres://user:pass@host:5432/db`.                   |
 | `AUTO_MIGRATE`                             | `true`                   | 启动时自动执行 Drizzle 迁移；生产环境可关闭以人工控制。                      |
 | `REDIS_URL`                                | `redis://localhost:6379` | Redis 地址，支持 `rediss://` 用于 TLS。                                      |
+| `REDIS_TLS_REJECT_UNAUTHORIZED`            | `true`                   | 是否验证 Redis TLS 证书；设为 `false` 可跳过验证（用于自签/共享证书）。      |
 | `ENABLE_RATE_LIMIT`                        | `true`                   | 控制多维限流开关；Fail-Open 策略在 Redis 不可用时自动降级。                  |
 | `SESSION_TTL`                              | `300`                    | Session 缓存时间（秒），影响供应商复用策略。                                 |
 | `ENABLE_SECURE_COOKIES`                    | `true`                   | 仅 HTTPS 场景能设置 Secure Cookie；HTTP 访问（非 localhost）需改为 `false`。 |

@@ -3,7 +3,9 @@
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
+import { ProviderTypeFilter } from "@/app/[locale]/settings/providers/_components/provider-type-filter";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatTokenAmount } from "@/lib/utils";
 import type {
@@ -11,8 +13,10 @@ import type {
   LeaderboardEntry,
   LeaderboardPeriod,
   ModelLeaderboardEntry,
+  ProviderCacheHitRateLeaderboardEntry,
   ProviderLeaderboardEntry,
 } from "@/repository/leaderboard";
+import type { ProviderType } from "@/types/provider";
 import { DateRangePicker } from "./date-range-picker";
 import { type ColumnDef, LeaderboardTable } from "./leaderboard-table";
 
@@ -20,11 +24,12 @@ interface LeaderboardViewProps {
   isAdmin: boolean;
 }
 
-type LeaderboardScope = "user" | "provider" | "model";
+type LeaderboardScope = "user" | "provider" | "providerCacheHitRate" | "model";
 type UserEntry = LeaderboardEntry & { totalCostFormatted?: string };
 type ProviderEntry = ProviderLeaderboardEntry & { totalCostFormatted?: string };
+type ProviderCacheHitRateEntry = ProviderCacheHitRateLeaderboardEntry;
 type ModelEntry = ModelLeaderboardEntry & { totalCostFormatted?: string };
-type AnyEntry = UserEntry | ProviderEntry | ModelEntry;
+type AnyEntry = UserEntry | ProviderEntry | ProviderCacheHitRateEntry | ModelEntry;
 
 const VALID_PERIODS: LeaderboardPeriod[] = ["daily", "weekly", "monthly", "allTime", "custom"];
 
@@ -34,7 +39,10 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
 
   const urlScope = searchParams.get("scope") as LeaderboardScope | null;
   const initialScope: LeaderboardScope =
-    (urlScope === "provider" || urlScope === "model") && isAdmin ? urlScope : "user";
+    (urlScope === "provider" || urlScope === "providerCacheHitRate" || urlScope === "model") &&
+    isAdmin
+      ? urlScope
+      : "user";
   const urlPeriod = searchParams.get("period") as LeaderboardPeriod | null;
   const initialPeriod: LeaderboardPeriod =
     urlPeriod && VALID_PERIODS.includes(urlPeriod) ? urlPeriod : "daily";
@@ -42,6 +50,7 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
   const [scope, setScope] = useState<LeaderboardScope>(initialScope);
   const [period, setPeriod] = useState<LeaderboardPeriod>(initialPeriod);
   const [dateRange, setDateRange] = useState<DateRangeParams | undefined>(undefined);
+  const [providerTypeFilter, setProviderTypeFilter] = useState<ProviderType | "all">("all");
   const [data, setData] = useState<AnyEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +60,10 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
   useEffect(() => {
     const urlScopeParam = searchParams.get("scope") as LeaderboardScope | null;
     const normalizedScope: LeaderboardScope =
-      (urlScopeParam === "provider" || urlScopeParam === "model") && isAdmin
+      (urlScopeParam === "provider" ||
+        urlScopeParam === "providerCacheHitRate" ||
+        urlScopeParam === "model") &&
+      isAdmin
         ? urlScopeParam
         : "user";
 
@@ -78,6 +90,9 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
         if (period === "custom" && dateRange) {
           url += `&startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`;
         }
+        if (scope === "providerCacheHitRate" && providerTypeFilter !== "all") {
+          url += `&providerType=${encodeURIComponent(providerTypeFilter)}`;
+        }
         const res = await fetch(url);
 
         if (!res.ok) {
@@ -102,7 +117,7 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
     return () => {
       cancelled = true;
     };
-  }, [scope, period, dateRange, t]);
+  }, [scope, period, dateRange, providerTypeFilter, t]);
 
   const handlePeriodChange = useCallback(
     (newPeriod: LeaderboardPeriod, newDateRange?: DateRangeParams) => {
@@ -112,25 +127,17 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
     []
   );
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="py-8">
-          <div className="text-center text-muted-foreground">{t("states.loading")}</div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (error) {
-    return (
-      <Card>
-        <CardContent className="py-8">
-          <div className="text-center text-destructive">{error}</div>
-        </CardContent>
-      </Card>
-    );
-  }
+  const skeletonColumns =
+    scope === "user"
+      ? 5
+      : scope === "provider"
+        ? 7
+        : scope === "providerCacheHitRate"
+          ? 8
+          : scope === "model"
+            ? 6
+            : 5;
+  const skeletonGridStyle = { gridTemplateColumns: `repeat(${skeletonColumns}, minmax(0, 1fr))` };
 
   // 列定义（根据 scope 动态切换）
   const userColumns: ColumnDef<UserEntry>[] = [
@@ -200,6 +207,38 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
     },
   ];
 
+  const providerCacheHitRateColumns: ColumnDef<ProviderCacheHitRateEntry>[] = [
+    {
+      header: t("columns.provider"),
+      cell: (row, index) => (
+        <span className={index < 3 ? "font-semibold" : ""}>
+          {(row as ProviderCacheHitRateEntry).providerName}
+        </span>
+      ),
+    },
+    {
+      header: t("columns.cacheHitRequests"),
+      className: "text-right",
+      cell: (row) => (row as ProviderCacheHitRateEntry).totalRequests.toLocaleString(),
+    },
+    {
+      header: t("columns.cacheHitRate"),
+      className: "text-right",
+      cell: (row) =>
+        `${(Number((row as ProviderCacheHitRateEntry).cacheHitRate || 0) * 100).toFixed(1)}%`,
+    },
+    {
+      header: t("columns.cacheReadTokens"),
+      className: "text-right",
+      cell: (row) => formatTokenAmount((row as ProviderCacheHitRateEntry).cacheReadTokens),
+    },
+    {
+      header: t("columns.totalTokens"),
+      className: "text-right",
+      cell: (row) => formatTokenAmount((row as ProviderCacheHitRateEntry).totalTokens),
+    },
+  ];
+
   const modelColumns: ColumnDef<ModelEntry>[] = [
     {
       header: t("columns.model"),
@@ -240,6 +279,8 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
         return userColumns as ColumnDef<AnyEntry>[];
       case "provider":
         return providerColumns as ColumnDef<AnyEntry>[];
+      case "providerCacheHitRate":
+        return providerCacheHitRateColumns as ColumnDef<AnyEntry>[];
       case "model":
         return modelColumns as ColumnDef<AnyEntry>[];
     }
@@ -251,6 +292,8 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
         return (row as UserEntry).userId;
       case "provider":
         return (row as ProviderEntry).providerId;
+      case "providerCacheHitRate":
+        return (row as ProviderCacheHitRateEntry).providerId;
       case "model":
         return (row as ModelEntry).model;
     }
@@ -261,12 +304,25 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
       {/* Scope toggle */}
       <div className="flex flex-wrap gap-4 items-center mb-4">
         <Tabs value={scope} onValueChange={(v) => setScope(v as LeaderboardScope)}>
-          <TabsList className={isAdmin ? "grid grid-cols-3" : ""}>
+          <TabsList className={isAdmin ? "grid grid-cols-4" : ""}>
             <TabsTrigger value="user">{t("tabs.userRanking")}</TabsTrigger>
             {isAdmin && <TabsTrigger value="provider">{t("tabs.providerRanking")}</TabsTrigger>}
+            {isAdmin && (
+              <TabsTrigger value="providerCacheHitRate">
+                {t("tabs.providerCacheHitRateRanking")}
+              </TabsTrigger>
+            )}
             {isAdmin && <TabsTrigger value="model">{t("tabs.modelRanking")}</TabsTrigger>}
           </TabsList>
         </Tabs>
+
+        {scope === "providerCacheHitRate" ? (
+          <ProviderTypeFilter
+            value={providerTypeFilter}
+            onChange={setProviderTypeFilter}
+            disabled={loading}
+          />
+        ) : null}
       </div>
 
       {/* Date range picker with quick period buttons */}
@@ -280,7 +336,44 @@ export function LeaderboardView({ isAdmin }: LeaderboardViewProps) {
 
       {/* 数据表格 */}
       <div>
-        <LeaderboardTable data={data} period={period} columns={columns} getRowKey={rowKey} />
+        {loading ? (
+          <Card>
+            <CardContent className="py-6 space-y-4">
+              <div className="space-y-3">
+                <div className="grid gap-4" style={skeletonGridStyle}>
+                  {Array.from({ length: skeletonColumns }).map((_, index) => (
+                    <Skeleton key={`leaderboard-head-${index}`} className="h-4 w-full" />
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  {Array.from({ length: 6 }).map((_, rowIndex) => (
+                    <div
+                      key={`leaderboard-row-${rowIndex}`}
+                      className="grid gap-4"
+                      style={skeletonGridStyle}
+                    >
+                      {Array.from({ length: skeletonColumns }).map((_, colIndex) => (
+                        <Skeleton
+                          key={`leaderboard-cell-${rowIndex}-${colIndex}`}
+                          className="h-4 w-full"
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="text-center text-xs text-muted-foreground">{t("states.loading")}</div>
+            </CardContent>
+          </Card>
+        ) : error ? (
+          <Card>
+            <CardContent className="py-8">
+              <div className="text-center text-destructive">{error}</div>
+            </CardContent>
+          </Card>
+        ) : (
+          <LeaderboardTable data={data} period={period} columns={columns} getRowKey={rowKey} />
+        )}
       </div>
     </div>
   );

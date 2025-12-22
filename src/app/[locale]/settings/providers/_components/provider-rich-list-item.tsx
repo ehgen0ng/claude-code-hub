@@ -1,4 +1,5 @@
 "use client";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle,
@@ -77,6 +78,7 @@ export function ProviderRichListItem({
   onDelete: onDeleteProp,
 }: ProviderRichListItemProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [openEdit, setOpenEdit] = useState(false);
   const [openClone, setOpenClone] = useState(false);
   const [showKeyDialog, setShowKeyDialog] = useState(false);
@@ -133,6 +135,8 @@ export function ProviderRichListItem({
             toast.success(tList("deleteSuccess"), {
               description: tList("deleteSuccessDesc", { name: provider.name }),
             });
+            queryClient.invalidateQueries({ queryKey: ["providers"] });
+            queryClient.invalidateQueries({ queryKey: ["providers-health"] });
             router.refresh();
           } else {
             toast.error(tList("deleteFailed"), {
@@ -152,12 +156,20 @@ export function ProviderRichListItem({
   // 处理查看密钥
   const handleShowKey = async () => {
     setShowKeyDialog(true);
-    const result = await getUnmaskedProviderKey(provider.id);
-    if (result.ok) {
-      setUnmaskedKey(result.data.key);
-    } else {
+    try {
+      const result = await getUnmaskedProviderKey(provider.id);
+      if (result.ok) {
+        setUnmaskedKey(result.data.key);
+      } else {
+        toast.error(tList("getKeyFailed"), {
+          description: result.error || tList("unknownError"),
+        });
+        setShowKeyDialog(false);
+      }
+    } catch (error) {
+      console.error("Failed to get provider key:", error);
       toast.error(tList("getKeyFailed"), {
-        description: result.error || tList("unknownError"),
+        description: tList("unknownError"),
       });
       setShowKeyDialog(false);
     }
@@ -194,6 +206,8 @@ export function ProviderRichListItem({
           toast.success(tList("resetCircuitSuccess"), {
             description: tList("resetCircuitSuccessDesc", { name: provider.name }),
           });
+          queryClient.invalidateQueries({ queryKey: ["providers"] });
+          queryClient.invalidateQueries({ queryKey: ["providers-health"] });
           router.refresh();
         } else {
           toast.error(tList("resetCircuitFailed"), {
@@ -221,6 +235,8 @@ export function ProviderRichListItem({
           toast.success(tList("toggleSuccess", { status }), {
             description: tList("toggleSuccessDesc", { name: provider.name }),
           });
+          queryClient.invalidateQueries({ queryKey: ["providers"] });
+          queryClient.invalidateQueries({ queryKey: ["providers-health"] });
           router.refresh();
         } else {
           toast.error(tList("toggleFailed"), {
@@ -481,6 +497,8 @@ export function ProviderRichListItem({
               provider={provider}
               onSuccess={() => {
                 setOpenEdit(false);
+                queryClient.invalidateQueries({ queryKey: ["providers"] });
+                queryClient.invalidateQueries({ queryKey: ["providers-health"] });
                 router.refresh();
               }}
               enableMultiProviderTypes={enableMultiProviderTypes}
@@ -498,6 +516,8 @@ export function ProviderRichListItem({
               cloneProvider={provider}
               onSuccess={() => {
                 setOpenClone(false);
+                queryClient.invalidateQueries({ queryKey: ["providers"] });
+                queryClient.invalidateQueries({ queryKey: ["providers-health"] });
                 router.refresh();
               }}
               enableMultiProviderTypes={enableMultiProviderTypes}

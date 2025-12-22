@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { getKeys } from "@/actions/keys";
-import { exportUsageLogs, getFilterOptions } from "@/actions/usage-logs";
+import { exportUsageLogs } from "@/actions/usage-logs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,13 +21,24 @@ import {
 import type { Key } from "@/types/key";
 import type { ProviderDisplay } from "@/types/provider";
 import type { UserDisplay } from "@/types/user";
+import {
+  useLazyEndpoints,
+  useLazyModels,
+  useLazyStatusCodes,
+} from "../_hooks/use-lazy-filter-options";
 import { LogsDateRangePicker } from "./logs-date-range-picker";
+
+// 硬编码常用状态码（首次渲染时显示，无需等待加载）
+const COMMON_STATUS_CODES: number[] = [200, 400, 401, 429, 500];
 
 interface UsageLogsFiltersProps {
   isAdmin: boolean;
   users: UserDisplay[];
   providers: ProviderDisplay[];
   initialKeys: Key[];
+  isUsersLoading?: boolean;
+  isProvidersLoading?: boolean;
+  isKeysLoading?: boolean;
   filters: {
     userId?: number;
     keyId?: number;
@@ -51,58 +62,67 @@ export function UsageLogsFilters({
   users,
   providers,
   initialKeys,
+  isUsersLoading = false,
+  isProvidersLoading = false,
+  isKeysLoading = false,
   filters,
   onChange,
   onReset,
 }: UsageLogsFiltersProps) {
   const t = useTranslations("dashboard");
-  const [models, setModels] = useState<string[]>([]);
-  const [statusCodes, setStatusCodes] = useState<number[]>([]);
-  const [endpoints, setEndpoints] = useState<string[]>([]);
-  const [isEndpointLoading, setIsEndpointLoading] = useState(false);
-  const [endpointError, setEndpointError] = useState<string | null>(null);
+
+  // 惰性加载 hooks - 下拉展开时才加载数据
+  const {
+    data: models,
+    isLoading: isModelsLoading,
+    onOpenChange: onModelsOpenChange,
+  } = useLazyModels();
+
+  const {
+    data: dynamicStatusCodes,
+    isLoading: isStatusCodesLoading,
+    onOpenChange: onStatusCodesOpenChange,
+  } = useLazyStatusCodes();
+
+  const {
+    data: endpoints,
+    isLoading: isEndpointsLoading,
+    onOpenChange: onEndpointsOpenChange,
+  } = useLazyEndpoints();
+
+  // 合并硬编码和动态状态码（去重）
+  const allStatusCodes = useMemo(() => {
+    const dynamicOnly = dynamicStatusCodes.filter((code) => !COMMON_STATUS_CODES.includes(code));
+    return dynamicOnly;
+  }, [dynamicStatusCodes]);
+
   const [keys, setKeys] = useState<Key[]>(initialKeys);
   const [localFilters, setLocalFilters] = useState(filters);
   const [isExporting, setIsExporting] = useState(false);
 
-  // 加载筛选器选项
   useEffect(() => {
-    const loadOptions = async () => {
-      setIsEndpointLoading(true);
-      setEndpointError(null);
+    if (initialKeys.length > 0) {
+      setKeys(initialKeys);
+    }
+  }, [initialKeys]);
 
-      try {
-        // 使用带缓存的 getFilterOptions，避免每次挂载都执行 3 次 DISTINCT 全表扫描
-        const optionsResult = await getFilterOptions();
-
-        if (optionsResult.ok && optionsResult.data) {
-          setModels(optionsResult.data.models);
-          setStatusCodes(optionsResult.data.statusCodes);
-          setEndpoints(optionsResult.data.endpoints);
-        } else {
-          setEndpoints([]);
-          setEndpointError(!optionsResult.ok ? optionsResult.error : t("logs.error.loadFailed"));
-        }
-      } catch (error) {
-        console.error("Failed to load filter options:", error);
-        setEndpoints([]);
-        setEndpointError(t("logs.error.loadFailed"));
-      } finally {
-        setIsEndpointLoading(false);
-      }
-
-      // 管理员：如果选择了用户，加载该用户的 keys
-      // 非管理员：已经有 initialKeys，不需要额外加载
-      if (isAdmin && localFilters.userId) {
-        const keysResult = await getKeys(localFilters.userId);
-        if (keysResult.ok && keysResult.data) {
-          setKeys(keysResult.data);
+  // 管理员用户首次加载时，如果 URL 中有 userId 参数，需要加载该用户的 keys
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 故意仅在组件挂载时执行一次
+  useEffect(() => {
+    const loadInitialKeys = async () => {
+      if (isAdmin && filters.userId && initialKeys.length === 0) {
+        try {
+          const keysResult = await getKeys(filters.userId);
+          if (keysResult.ok && keysResult.data) {
+            setKeys(keysResult.data);
+          }
+        } catch (error) {
+          console.error("Failed to load initial keys:", error);
         }
       }
     };
-
-    loadOptions();
-  }, [isAdmin, localFilters.userId, t]);
+    loadInitialKeys();
+  }, []);
 
   // 处理用户选择变更
   const handleUserChange = async (userId: string) => {
@@ -112,9 +132,14 @@ export function UsageLogsFilters({
 
     // 加载该用户的 keys
     if (newUserId) {
-      const keysResult = await getKeys(newUserId);
-      if (keysResult.ok && keysResult.data) {
-        setKeys(keysResult.data);
+      try {
+        const keysResult = await getKeys(newUserId);
+        if (keysResult.ok && keysResult.data) {
+          setKeys(keysResult.data);
+        }
+      } catch (error) {
+        console.error("Failed to load keys:", error);
+        toast.error(t("logs.error.loadKeysFailed"));
       }
     } else {
       setKeys([]);
@@ -238,9 +263,17 @@ export function UsageLogsFilters({
         {isAdmin && (
           <div className="space-y-2 lg:col-span-4">
             <Label>{t("logs.filters.user")}</Label>
-            <Select value={localFilters.userId?.toString() || ""} onValueChange={handleUserChange}>
+            <Select
+              value={localFilters.userId?.toString() || ""}
+              onValueChange={handleUserChange}
+              disabled={isUsersLoading}
+            >
               <SelectTrigger>
-                <SelectValue placeholder={t("logs.filters.allUsers")} />
+                <SelectValue
+                  placeholder={
+                    isUsersLoading ? t("logs.stats.loading") : t("logs.filters.allUsers")
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {users.map((user) => (
@@ -264,14 +297,16 @@ export function UsageLogsFilters({
                 keyId: value ? parseInt(value, 10) : undefined,
               })
             }
-            disabled={isAdmin && !localFilters.userId && keys.length === 0}
+            disabled={isKeysLoading || (isAdmin && !localFilters.userId && keys.length === 0)}
           >
             <SelectTrigger>
               <SelectValue
                 placeholder={
-                  isAdmin && !localFilters.userId && keys.length === 0
-                    ? t("logs.filters.selectUserFirst")
-                    : t("logs.filters.allKeys")
+                  isKeysLoading
+                    ? t("logs.stats.loading")
+                    : isAdmin && !localFilters.userId && keys.length === 0
+                      ? t("logs.filters.selectUserFirst")
+                      : t("logs.filters.allKeys")
                 }
               />
             </SelectTrigger>
@@ -297,9 +332,14 @@ export function UsageLogsFilters({
                   providerId: value ? parseInt(value, 10) : undefined,
                 })
               }
+              disabled={isProvidersLoading}
             >
               <SelectTrigger>
-                <SelectValue placeholder={t("logs.filters.allProviders")} />
+                <SelectValue
+                  placeholder={
+                    isProvidersLoading ? t("logs.stats.loading") : t("logs.filters.allProviders")
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {providers.map((provider) => (
@@ -316,20 +356,31 @@ export function UsageLogsFilters({
         <div className="space-y-2 lg:col-span-4">
           <Label>{t("logs.filters.model")}</Label>
           <Select
-            value={localFilters.model || ""}
+            value={localFilters.model || "all"}
             onValueChange={(value: string) =>
-              setLocalFilters({ ...localFilters, model: value || undefined })
+              setLocalFilters({ ...localFilters, model: value === "all" ? undefined : value })
             }
+            onOpenChange={onModelsOpenChange}
           >
             <SelectTrigger>
-              <SelectValue placeholder={t("logs.filters.allModels")} />
+              <SelectValue
+                placeholder={
+                  isModelsLoading ? t("logs.stats.loading") : t("logs.filters.allModels")
+                }
+              />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="all">{t("logs.filters.allModels")}</SelectItem>
               {models.map((model) => (
                 <SelectItem key={model} value={model}>
                   {model}
                 </SelectItem>
               ))}
+              {isModelsLoading && (
+                <div className="p-2 text-center text-muted-foreground text-sm">
+                  {t("logs.stats.loading")}
+                </div>
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -342,16 +393,12 @@ export function UsageLogsFilters({
             onValueChange={(value: string) =>
               setLocalFilters({ ...localFilters, endpoint: value === "all" ? undefined : value })
             }
-            disabled={isEndpointLoading}
+            onOpenChange={onEndpointsOpenChange}
           >
             <SelectTrigger>
               <SelectValue
                 placeholder={
-                  endpointError
-                    ? endpointError
-                    : isEndpointLoading
-                      ? t("logs.stats.loading")
-                      : t("logs.filters.allEndpoints")
+                  isEndpointsLoading ? t("logs.stats.loading") : t("logs.filters.allEndpoints")
                 }
               />
             </SelectTrigger>
@@ -362,9 +409,13 @@ export function UsageLogsFilters({
                   {endpoint}
                 </SelectItem>
               ))}
+              {isEndpointsLoading && (
+                <div className="p-2 text-center text-muted-foreground text-sm">
+                  {t("logs.stats.loading")}
+                </div>
+              )}
             </SelectContent>
           </Select>
-          {endpointError && <p className="text-xs text-destructive">{endpointError}</p>}
         </div>
 
         {/* 状态码选择 */}
@@ -381,6 +432,7 @@ export function UsageLogsFilters({
                 excludeStatusCode200: value === "!200",
               })
             }
+            onOpenChange={onStatusCodesOpenChange}
           >
             <SelectTrigger>
               <SelectValue placeholder={t("logs.filters.allStatusCodes")} />
@@ -392,13 +444,16 @@ export function UsageLogsFilters({
               <SelectItem value="401">{t("logs.statusCodes.401")}</SelectItem>
               <SelectItem value="429">{t("logs.statusCodes.429")}</SelectItem>
               <SelectItem value="500">{t("logs.statusCodes.500")}</SelectItem>
-              {statusCodes
-                .filter((code) => ![200, 400, 401, 429, 500].includes(code))
-                .map((code) => (
-                  <SelectItem key={code} value={code.toString()}>
-                    {code}
-                  </SelectItem>
-                ))}
+              {allStatusCodes.map((code) => (
+                <SelectItem key={code} value={code.toString()}>
+                  {code}
+                </SelectItem>
+              ))}
+              {isStatusCodesLoading && (
+                <div className="p-2 text-center text-muted-foreground text-sm">
+                  {t("logs.stats.loading")}
+                </div>
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -423,13 +478,13 @@ export function UsageLogsFilters({
       </div>
 
       {/* 操作按钮 */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button onClick={handleApply}>{t("logs.filters.apply")}</Button>
         <Button variant="outline" onClick={handleReset}>
           {t("logs.filters.reset")}
         </Button>
         <Button variant="outline" onClick={handleExport} disabled={isExporting}>
-          <Download className="mr-2 h-4 w-4" />
+          <Download className="mr-2 h-4 w-4" aria-hidden="true" />
           {isExporting ? t("logs.filters.exporting") : t("logs.filters.export")}
         </Button>
       </div>

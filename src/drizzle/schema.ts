@@ -36,9 +36,25 @@ export const users = pgTable('users', {
   limitTotalUsd: numeric('limit_total_usd', { precision: 10, scale: 2 }),
   limitConcurrentSessions: integer('limit_concurrent_sessions'),
 
+  // Daily quota reset mode (fixed: reset at specific time, rolling: 24h window)
+  dailyResetMode: dailyResetModeEnum('daily_reset_mode')
+    .default('fixed')
+    .notNull(),
+  dailyResetTime: varchar('daily_reset_time', { length: 5 })
+    .default('00:00')
+    .notNull(), // HH:mm format, only used in 'fixed' mode
+
   // User status and expiry management
   isEnabled: boolean('is_enabled').notNull().default(true),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
+
+  // Allowed clients (CLI/IDE restrictions)
+  // Empty array = no restrictions, non-empty = only listed patterns allowed
+  allowedClients: jsonb('allowed_clients').$type<string[]>().default([]),
+
+  // Allowed models (AI model restrictions)
+  // Empty array = no restrictions, non-empty = only listed models allowed
+  allowedModels: jsonb('allowed_models').$type<string[]>().default([]),
 
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
@@ -283,6 +299,8 @@ export const messageRequest = pgTable('message_request', {
 
   // 错误信息
   errorMessage: text('error_message'),
+  errorStack: text('error_stack'),  // 完整堆栈信息，用于排查 TypeError: terminated 等流错误
+  errorCause: text('error_cause'),  // 嵌套错误原因（JSON 格式），如 NGHTTP2_INTERNAL_ERROR
 
   // 拦截原因（用于记录被敏感词等规则拦截的请求）
   blockedBy: varchar('blocked_by', { length: 50 }),

@@ -1,11 +1,14 @@
 import { Info } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import { Suspense } from "react";
 import { getUserLimitUsage, getUsers } from "@/actions/users";
 import { QuotaToolbar } from "@/components/quota/quota-toolbar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Link } from "@/i18n/routing";
+import { Link, redirect } from "@/i18n/routing";
+import { getSession } from "@/lib/auth";
 import { sumKeyTotalCostById, sumUserTotalCost } from "@/repository/statistics";
 import { getSystemSettings } from "@/repository/system-config";
+import { UsersQuotaSkeleton } from "../_components/users-quota-skeleton";
 import type { UserKeyWithUsage, UserQuotaWithUsage } from "./_components/types";
 import { UsersQuotaClient } from "./_components/users-quota-client";
 
@@ -72,8 +75,15 @@ async function getUsersWithQuotas(): Promise<UserQuotaWithUsage[]> {
   return usersWithQuotas;
 }
 
-export default async function UsersQuotaPage() {
-  const [users, systemSettings] = await Promise.all([getUsersWithQuotas(), getSystemSettings()]);
+export default async function UsersQuotaPage({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale } = await params;
+  const session = await getSession();
+
+  // 权限检查：仅 admin 用户可访问
+  if (!session || session.user.role !== "admin") {
+    return redirect({ href: session ? "/dashboard" : "/login", locale });
+  }
+
   const t = await getTranslations("quota.users");
 
   return (
@@ -81,9 +91,6 @@ export default async function UsersQuotaPage() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-medium">{t("title")}</h3>
-          <p className="text-sm text-muted-foreground">
-            {t("totalCount", { count: users.length })}
-          </p>
         </div>
       </div>
 
@@ -109,6 +116,20 @@ export default async function UsersQuotaPage() {
         ]}
       />
 
+      <Suspense fallback={<UsersQuotaSkeleton />}>
+        <UsersQuotaContent />
+      </Suspense>
+    </div>
+  );
+}
+
+async function UsersQuotaContent() {
+  const [users, systemSettings] = await Promise.all([getUsersWithQuotas(), getSystemSettings()]);
+  const t = await getTranslations("quota.users");
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">{t("totalCount", { count: users.length })}</p>
       <UsersQuotaClient users={users} currencyCode={systemSettings.currencyDisplay} />
     </div>
   );

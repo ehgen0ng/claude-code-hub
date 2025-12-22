@@ -371,7 +371,7 @@ export async function countActiveKeysByUser(userId: number): Promise<number> {
   const [row] = await db
     .select({ count: count() })
     .from(keys)
-    .where(and(eq(keys.userId, userId), isNull(keys.deletedAt)));
+    .where(and(eq(keys.userId, userId), eq(keys.isEnabled, true), isNull(keys.deletedAt)));
 
   return Number(row?.count || 0);
 }
@@ -461,6 +461,8 @@ export async function validateApiKeyAndGetUser(
       userLimitTotalUsd: users.limitTotalUsd,
       userIsEnabled: users.isEnabled,
       userExpiresAt: users.expiresAt,
+      userAllowedClients: users.allowedClients,
+      userAllowedModels: users.allowedModels,
       userCreatedAt: users.createdAt,
       userUpdatedAt: users.updatedAt,
       userDeletedAt: users.deletedAt,
@@ -494,6 +496,8 @@ export async function validateApiKeyAndGetUser(
     limitTotalUsd: row.userLimitTotalUsd,
     isEnabled: row.userIsEnabled,
     expiresAt: row.userExpiresAt,
+    allowedClients: row.userAllowedClients,
+    allowedModels: row.userAllowedModels,
     createdAt: row.userCreatedAt,
     updatedAt: row.userUpdatedAt,
     deletedAt: row.userDeletedAt,

@@ -1,17 +1,16 @@
-import { redirect } from "next/navigation";
-import { getUsers } from "@/actions/users";
+import { redirect } from "@/i18n/routing";
 import { getSession } from "@/lib/auth";
 import { UsersPageClient } from "./users-page-client";
 
-export default async function UsersPage() {
+export default async function UsersPage({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale } = await params;
   const session = await getSession();
 
-  // Redirect unauthenticated users
+  // 权限检查：允许所有登录用户访问
   if (!session) {
-    redirect("/login");
+    return redirect({ href: "/login", locale });
   }
 
-  const users = await getUsers();
-
-  return <UsersPageClient users={users} currentUser={session.user} />;
+  // TypeScript: session is guaranteed to be non-null after the redirect check
+  return <UsersPageClient currentUser={session.user} />;
 }

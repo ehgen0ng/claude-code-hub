@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { GeminiAuth } from "@/app/v1/_lib/gemini/auth";
 import { isClientAbortError } from "@/app/v1/_lib/proxy/errors";
 import { getSession } from "@/lib/auth";
-import { clearConfigCache, getAllHealthStatusAsync, resetCircuit } from "@/lib/circuit-breaker";
+import {
+  clearConfigCache,
+  clearProviderState,
+  getAllHealthStatusAsync,
+  resetCircuit,
+} from "@/lib/circuit-breaker";
 import { CodexInstructionsCache } from "@/lib/codex-instructions-cache";
 import { PROVIDER_TIMEOUT_DEFAULTS } from "@/lib/constants/provider.constants";
 import { logger } from "@/lib/logger";
@@ -276,6 +281,41 @@ export async function getAvailableProviderGroups(userId?: number): Promise<strin
   } catch (error) {
     logger.error("获取供应商分组失败:", error);
     return [];
+  }
+}
+
+/**
+ * 获取所有分组及每个分组的供应商数量
+ * @returns 分组列表及每个分组的供应商数量
+ */
+export async function getProviderGroupsWithCount(): Promise<
+  ActionResult<Array<{ group: string; providerCount: number }>>
+> {
+  try {
+    const providers = await findAllProviders();
+    const groupCounts = new Map<string, number>();
+
+    for (const provider of providers) {
+      if (provider.groupTag) {
+        const groups = provider.groupTag
+          .split(",")
+          .map((g) => g.trim())
+          .filter(Boolean);
+
+        for (const group of groups) {
+          groupCounts.set(group, (groupCounts.get(group) || 0) + 1);
+        }
+      }
+    }
+
+    const result = Array.from(groupCounts.entries())
+      .map(([group, providerCount]) => ({ group, providerCount }))
+      .sort((a, b) => a.group.localeCompare(b.group));
+
+    return { ok: true, data: result };
+  } catch (error) {
+    logger.error("获取供应商分组统计失败:", error);
+    return { ok: false, error: "获取供应商分组统计失败" };
   }
 }
 
@@ -585,14 +625,16 @@ export async function removeProvider(providerId: number): Promise<ActionResult> 
 
     await deleteProvider(providerId);
 
-    // 删除 Redis 缓存
+    // 清除内存缓存（无论 Redis 是否成功都要执行）
+    clearConfigCache(providerId);
+    await clearProviderState(providerId);
+
+    // 删除 Redis 缓存（非关键路径，失败时记录警告）
     try {
       await deleteProviderCircuitConfig(providerId);
-      // 清除内存缓存
-      clearConfigCache(providerId);
       logger.debug("removeProvider:cache_cleared", { providerId });
     } catch (error) {
-      logger.warn("removeProvider:cache_clear_failed", {
+      logger.warn("removeProvider:redis_cache_clear_failed", {
         providerId,
         error: error instanceof Error ? error.message : String(error),
       });

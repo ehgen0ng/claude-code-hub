@@ -78,7 +78,6 @@ import { SessionTracker } from "@/lib/session-tracker";
 import { sumKeyTotalCost, sumUserCostToday, sumUserTotalCost } from "@/repository/statistics";
 import {
   type DailyResetMode,
-  getSecondsUntilMidnight,
   getTimeRangeForPeriodWithMode,
   getTTLForPeriod,
   getTTLForPeriodWithMode,
@@ -104,13 +103,35 @@ export class RateLimitService {
     return { normalized, suffix: normalized.replace(":", "") };
   }
 
+  private static async warmRollingCostZset(
+    key: string,
+    entries: Array<{ id: number; createdAt: Date; costUsd: number }>,
+    ttlSeconds: number
+  ): Promise<void> {
+    if (!RateLimitService.redis || RateLimitService.redis.status !== "ready") return;
+    if (entries.length === 0) return;
+
+    const pipeline = RateLimitService.redis.pipeline();
+
+    for (const entry of entries) {
+      const createdAtMs = entry.createdAt.getTime();
+      if (!Number.isFinite(createdAtMs)) continue;
+      if (!Number.isFinite(entry.costUsd) || entry.costUsd <= 0) continue;
+
+      pipeline.zadd(key, createdAtMs, `${createdAtMs}:${entry.id}:${entry.costUsd}`);
+    }
+
+    pipeline.expire(key, ttlSeconds);
+    await pipeline.exec();
+  }
+
   /**
-   * 检查金额限制（Key 或 Provider）
+   * 检查金额限制（Key、Provider 或 User）
    * 优先使用 Redis，失败时降级到数据库查询（防止 Redis 清空后超支）
    */
   static async checkCostLimits(
     id: number,
-    type: "key" | "provider",
+    type: "key" | "provider" | "user",
     limits: {
       limit_5h_usd: number | null;
       limit_daily_usd: number | null;
@@ -334,12 +355,17 @@ export class RateLimitService {
    */
   private static async checkCostLimitsFromDatabase(
     id: number,
-    type: "key" | "provider",
+    type: "key" | "provider" | "user",
     costLimits: CostLimit[]
   ): Promise<{ allowed: boolean; reason?: string }> {
-    const { sumKeyCostInTimeRange, sumProviderCostInTimeRange } = await import(
-      "@/repository/statistics"
-    );
+    const {
+      findKeyCostEntriesInTimeRange,
+      findProviderCostEntriesInTimeRange,
+      findUserCostEntriesInTimeRange,
+      sumKeyCostInTimeRange,
+      sumProviderCostInTimeRange,
+      sumUserCostInTimeRange,
+    } = await import("@/repository/statistics");
 
     for (const limit of costLimits) {
       if (!limit.amount || limit.amount <= 0) continue;
@@ -352,50 +378,67 @@ export class RateLimitService {
       );
 
       // 查询数据库
-      const current =
-        type === "key"
-          ? await sumKeyCostInTimeRange(id, startTime, endTime)
-          : await sumProviderCostInTimeRange(id, startTime, endTime);
+      let current = 0;
+      let costEntries: Array<{
+        id: number;
+        createdAt: Date;
+        costUsd: number;
+      }> | null = null;
+
+      const isRollingWindow =
+        limit.period === "5h" || (limit.period === "daily" && limit.resetMode === "rolling");
+
+      if (isRollingWindow) {
+        switch (type) {
+          case "key":
+            costEntries = await findKeyCostEntriesInTimeRange(id, startTime, endTime);
+            break;
+          case "provider":
+            costEntries = await findProviderCostEntriesInTimeRange(id, startTime, endTime);
+            break;
+          case "user":
+            costEntries = await findUserCostEntriesInTimeRange(id, startTime, endTime);
+            break;
+          default:
+            costEntries = [];
+        }
+
+        current = costEntries.reduce((sum, row) => sum + row.costUsd, 0);
+      } else {
+        switch (type) {
+          case "key":
+            current = await sumKeyCostInTimeRange(id, startTime, endTime);
+            break;
+          case "provider":
+            current = await sumProviderCostInTimeRange(id, startTime, endTime);
+            break;
+          case "user":
+            current = await sumUserCostInTimeRange(id, startTime, endTime);
+            break;
+          default:
+            current = 0;
+        }
+      }
 
       // Cache Warming: 写回 Redis
       if (RateLimitService.redis && RateLimitService.redis.status === "ready") {
         try {
           if (limit.period === "5h") {
-            // 5h 滚动窗口：使用 ZSET + Lua 脚本
-            if (current > 0) {
-              const now = Date.now();
-              const window5h = 5 * 60 * 60 * 1000;
+            // 5h 滚动窗口：Redis 恢复时必须按原始时间戳重建 ZSET，避免窗口边界偏差/重复累计
+            if (costEntries && costEntries.length > 0) {
               const key = `${type}:${id}:cost_5h_rolling`;
-
-              await RateLimitService.redis.eval(
-                TRACK_COST_5H_ROLLING_WINDOW,
-                1,
-                key,
-                current.toString(),
-                now.toString(),
-                window5h.toString()
+              await RateLimitService.warmRollingCostZset(key, costEntries, 21600);
+              logger.info(
+                `[RateLimit] Cache warmed for ${key}, value=${current} (rolling window, rebuilt)`
               );
-
-              logger.info(`[RateLimit] Cache warmed for ${key}, value=${current} (rolling window)`);
             }
           } else if (limit.period === "daily" && limit.resetMode === "rolling") {
             // daily 滚动窗口：使用 ZSET + Lua 脚本
-            if (current > 0) {
-              const now = Date.now();
-              const window24h = 24 * 60 * 60 * 1000;
+            if (costEntries && costEntries.length > 0) {
               const key = `${type}:${id}:cost_daily_rolling`;
-
-              await RateLimitService.redis.eval(
-                TRACK_COST_DAILY_ROLLING_WINDOW,
-                1,
-                key,
-                current.toString(),
-                now.toString(),
-                window24h.toString()
-              );
-
+              await RateLimitService.warmRollingCostZset(key, costEntries, 90000);
               logger.info(
-                `[RateLimit] Cache warmed for ${key}, value=${current} (daily rolling window)`
+                `[RateLimit] Cache warmed for ${key}, value=${current} (daily rolling window, rebuilt)`
               );
             }
           } else {
@@ -419,9 +462,10 @@ export class RateLimitService {
       }
 
       if (current >= limit.amount) {
+        const typeName = type === "key" ? "Key" : type === "provider" ? "供应商" : "User";
         return {
           allowed: false,
-          reason: `${type === "key" ? "Key" : "供应商"} ${limit.name}消费上限已达到（${current.toFixed(4)}/${limit.amount}）`,
+          reason: `${typeName} ${limit.name}消费上限已达到（${current.toFixed(4)}/${limit.amount}）`,
         };
       }
     }
@@ -539,6 +583,8 @@ export class RateLimitService {
       keyResetMode?: DailyResetMode;
       providerResetTime?: string;
       providerResetMode?: DailyResetMode;
+      requestId?: number;
+      createdAtMs?: number;
     }
   ): Promise<void> {
     if (!RateLimitService.redis || cost <= 0) return;
@@ -548,7 +594,8 @@ export class RateLimitService {
       const providerDailyReset = RateLimitService.resolveDailyReset(options?.providerResetTime);
       const keyDailyMode = options?.keyResetMode ?? "fixed";
       const providerDailyMode = options?.providerResetMode ?? "fixed";
-      const now = Date.now();
+      const now = options?.createdAtMs ?? Date.now();
+      const requestId = options?.requestId != null ? String(options.requestId) : "";
       const window5h = 5 * 60 * 60 * 1000; // 5 hours in ms
       const window24h = 24 * 60 * 60 * 1000; // 24 hours in ms
 
@@ -570,7 +617,8 @@ export class RateLimitService {
         `key:${keyId}:cost_5h_rolling`, // KEYS[1]
         cost.toString(), // ARGV[1]: cost
         now.toString(), // ARGV[2]: now
-        window5h.toString() // ARGV[3]: window
+        window5h.toString(), // ARGV[3]: window
+        requestId // ARGV[4]: request_id (optional)
       );
 
       // Provider 的 5h 滚动窗口
@@ -580,7 +628,8 @@ export class RateLimitService {
         `provider:${providerId}:cost_5h_rolling`,
         cost.toString(),
         now.toString(),
-        window5h.toString()
+        window5h.toString(),
+        requestId
       );
 
       // 2. daily 滚动窗口：使用 Lua 脚本（ZSET）
@@ -591,7 +640,8 @@ export class RateLimitService {
           `key:${keyId}:cost_daily_rolling`,
           cost.toString(),
           now.toString(),
-          window24h.toString()
+          window24h.toString(),
+          requestId
         );
       }
 
@@ -602,7 +652,8 @@ export class RateLimitService {
           `provider:${providerId}:cost_daily_rolling`,
           cost.toString(),
           now.toString(),
-          window24h.toString()
+          window24h.toString(),
+          requestId
         );
       }
 
@@ -740,61 +791,72 @@ export class RateLimitService {
       }
 
       // Slow Path: 数据库查询
-      const { sumKeyCostInTimeRange, sumProviderCostInTimeRange } = await import(
-        "@/repository/statistics"
-      );
+      const {
+        findKeyCostEntriesInTimeRange,
+        findProviderCostEntriesInTimeRange,
+        sumKeyCostInTimeRange,
+        sumProviderCostInTimeRange,
+      } = await import("@/repository/statistics");
 
       const { startTime, endTime } = getTimeRangeForPeriodWithMode(
         period,
         dailyResetInfo.normalized,
         resetMode
       );
-      const current =
-        type === "key"
-          ? await sumKeyCostInTimeRange(id, startTime, endTime)
-          : await sumProviderCostInTimeRange(id, startTime, endTime);
+
+      let current = 0;
+      let costEntries: Array<{
+        id: number;
+        createdAt: Date;
+        costUsd: number;
+      }> | null = null;
+
+      const isRollingWindow = period === "5h" || (period === "daily" && resetMode === "rolling");
+
+      if (isRollingWindow) {
+        switch (type) {
+          case "key":
+            costEntries = await findKeyCostEntriesInTimeRange(id, startTime, endTime);
+            break;
+          case "provider":
+            costEntries = await findProviderCostEntriesInTimeRange(id, startTime, endTime);
+            break;
+          default:
+            costEntries = [];
+        }
+
+        current = costEntries.reduce((sum, row) => sum + row.costUsd, 0);
+      } else {
+        switch (type) {
+          case "key":
+            current = await sumKeyCostInTimeRange(id, startTime, endTime);
+            break;
+          case "provider":
+            current = await sumProviderCostInTimeRange(id, startTime, endTime);
+            break;
+          default:
+            current = 0;
+        }
+      }
 
       // Cache Warming: 写回 Redis
       if (RateLimitService.redis && RateLimitService.redis.status === "ready") {
         try {
           if (period === "5h") {
-            // 5h 滚动窗口：需要将历史数据转换为 ZSET 格式
-            // 由于无法精确知道每次消费的时间戳，使用当前时间作为近似
-            if (current > 0) {
-              const now = Date.now();
-              const window5h = 5 * 60 * 60 * 1000;
+            if (costEntries && costEntries.length > 0) {
               const key = `${type}:${id}:cost_5h_rolling`;
-
-              // 将数据库查询到的总额作为单条记录写入
-              await RateLimitService.redis.eval(
-                TRACK_COST_5H_ROLLING_WINDOW,
-                1,
-                key,
-                current.toString(),
-                now.toString(),
-                window5h.toString()
+              await RateLimitService.warmRollingCostZset(key, costEntries, 21600);
+              logger.info(
+                `[RateLimit] Cache warmed for ${key}, value=${current} (rolling window, rebuilt)`
               );
-
-              logger.info(`[RateLimit] Cache warmed for ${key}, value=${current} (rolling window)`);
             }
           } else if (period === "daily" && resetMode === "rolling") {
             // daily 滚动窗口：使用 ZSET + Lua 脚本
-            if (current > 0) {
-              const now = Date.now();
-              const window24h = 24 * 60 * 60 * 1000;
+            if (costEntries && costEntries.length > 0) {
               const key = `${type}:${id}:cost_daily_rolling`;
-
-              await RateLimitService.redis.eval(
-                TRACK_COST_DAILY_ROLLING_WINDOW,
-                1,
-                key,
-                current.toString(),
-                now.toString(),
-                window24h.toString()
-              );
-
+              await RateLimitService.warmRollingCostZset(key, costEntries, 90000);
               logger.info(
-                `[RateLimit] Cache warmed for ${key}, value=${current} (daily rolling window)`
+                `[RateLimit] Cache warmed for ${key}, value=${current} (daily rolling window, rebuilt)`
               );
             }
           } else {
@@ -882,32 +944,85 @@ export class RateLimitService {
   /**
    * 检查用户每日消费额度限制
    * 优先使用 Redis，失败时降级到数据库查询
+   * @param resetTime - 重置时间 (HH:mm)，仅 fixed 模式使用
+   * @param resetMode - 重置模式：fixed 或 rolling
    */
   static async checkUserDailyCost(
     userId: number,
-    dailyLimitUsd: number
+    dailyLimitUsd: number,
+    resetTime?: string,
+    resetMode?: DailyResetMode
   ): Promise<{ allowed: boolean; reason?: string; current?: number }> {
     if (!dailyLimitUsd || dailyLimitUsd <= 0) {
       return { allowed: true }; // 未设置限制
     }
 
-    const key = `user:${userId}:daily_cost`;
+    const mode = resetMode ?? "fixed";
+    const normalizedResetTime = normalizeResetTime(resetTime);
     let currentCost = 0;
 
     try {
       // Fast Path: Redis 查询
-      if (RateLimitService.redis) {
-        const cached = await RateLimitService.redis.get(key);
-        if (cached !== null) {
-          currentCost = parseFloat(cached);
-        } else {
-          // Cache Miss: 从数据库恢复
-          logger.info(`[RateLimit] Cache miss for ${key}, querying database`);
-          currentCost = await sumUserCostToday(userId);
+      if (RateLimitService.redis && RateLimitService.redis.status === "ready") {
+        const now = Date.now();
 
-          // Cache Warming: 写回 Redis（使用新的时间工具函数）
-          const secondsUntilMidnight = getSecondsUntilMidnight();
-          await RateLimitService.redis.set(key, currentCost.toString(), "EX", secondsUntilMidnight);
+        if (mode === "rolling") {
+          // Rolling 模式：使用 ZSET + Lua 脚本
+          const key = `user:${userId}:cost_daily_rolling`;
+          const window24h = 24 * 60 * 60 * 1000;
+
+          const result = (await RateLimitService.redis.eval(
+            GET_COST_DAILY_ROLLING_WINDOW,
+            1,
+            key,
+            now.toString(),
+            window24h.toString()
+          )) as string;
+
+          currentCost = parseFloat(result || "0");
+
+          // Cache Miss 检测
+          if (currentCost === 0) {
+            const exists = await RateLimitService.redis.exists(key);
+            if (!exists) {
+              logger.info(
+                `[RateLimit] Cache miss for user:${userId}:cost_daily_rolling, querying database`
+              );
+
+              // 导入明细查询函数
+              const { findUserCostEntriesInTimeRange } = await import("@/repository/statistics");
+
+              // 计算滚动窗口的时间范围
+              const startTime = new Date(now - window24h);
+              const endTime = new Date(now);
+
+              // 查询明细并计算总和
+              const costEntries = await findUserCostEntriesInTimeRange(userId, startTime, endTime);
+              currentCost = costEntries.reduce((sum, row) => sum + row.costUsd, 0);
+
+              // Cache Warming: 重建 ZSET
+              if (costEntries.length > 0) {
+                await RateLimitService.warmRollingCostZset(key, costEntries, 90000); // 25 hours TTL
+              }
+            }
+          }
+        } else {
+          // Fixed 模式：使用 STRING 类型
+          const suffix = normalizedResetTime.replace(":", "");
+          const key = `user:${userId}:cost_daily_${suffix}`;
+
+          const cached = await RateLimitService.redis.get(key);
+          if (cached !== null) {
+            currentCost = parseFloat(cached);
+          } else {
+            // Cache Miss: 从数据库恢复
+            logger.info(`[RateLimit] Cache miss for ${key}, querying database`);
+            currentCost = await sumUserCostToday(userId);
+
+            // Cache Warming: 写回 Redis
+            const ttl = getTTLForPeriodWithMode("daily", normalizedResetTime, "fixed");
+            await RateLimitService.redis.set(key, currentCost.toString(), "EX", ttl);
+          }
         }
       } else {
         // Slow Path: 数据库查询（Redis 不可用）
@@ -932,22 +1047,51 @@ export class RateLimitService {
 
   /**
    * 累加用户今日消费（在 trackCost 后调用）
+   * @param resetTime - 重置时间 (HH:mm)，仅 fixed 模式使用
+   * @param resetMode - 重置模式：fixed 或 rolling
+   * @param options - 可选参数：requestId 和 createdAtMs 用于与 DB 时间轴保持一致
    */
-  static async trackUserDailyCost(userId: number, cost: number): Promise<void> {
+  static async trackUserDailyCost(
+    userId: number,
+    cost: number,
+    resetTime?: string,
+    resetMode?: DailyResetMode,
+    options?: { requestId?: number; createdAtMs?: number }
+  ): Promise<void> {
     if (!RateLimitService.redis || cost <= 0) return;
 
-    const key = `user:${userId}:daily_cost`;
+    const mode = resetMode ?? "fixed";
+    const normalizedResetTime = normalizeResetTime(resetTime);
 
     try {
-      const secondsUntilMidnight = getSecondsUntilMidnight();
+      if (mode === "rolling") {
+        // Rolling 模式：使用 ZSET + Lua 脚本
+        const key = `user:${userId}:cost_daily_rolling`;
+        const now = options?.createdAtMs ?? Date.now();
+        const window24h = 24 * 60 * 60 * 1000;
+        const requestId = options?.requestId != null ? String(options.requestId) : "";
 
-      await RateLimitService.redis
-        .pipeline()
-        .incrbyfloat(key, cost)
-        .expire(key, secondsUntilMidnight)
-        .exec();
+        await RateLimitService.redis.eval(
+          TRACK_COST_DAILY_ROLLING_WINDOW,
+          1,
+          key,
+          cost.toString(),
+          now.toString(),
+          window24h.toString(),
+          requestId
+        );
 
-      logger.debug(`[RateLimit] Tracked user daily cost: user=${userId}, cost=${cost}`);
+        logger.debug(`[RateLimit] Tracked user daily cost (rolling): user=${userId}, cost=${cost}`);
+      } else {
+        // Fixed 模式：使用 STRING 类型
+        const suffix = normalizedResetTime.replace(":", "");
+        const key = `user:${userId}:cost_daily_${suffix}`;
+        const ttl = getTTLForPeriodWithMode("daily", normalizedResetTime, "fixed");
+
+        await RateLimitService.redis.pipeline().incrbyfloat(key, cost).expire(key, ttl).exec();
+
+        logger.debug(`[RateLimit] Tracked user daily cost (fixed): user=${userId}, cost=${cost}`);
+      }
     } catch (error) {
       logger.error(`[RateLimit] Failed to track user daily cost:`, error);
     }
