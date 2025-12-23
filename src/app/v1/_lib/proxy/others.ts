@@ -8,8 +8,9 @@ const CACHE_CONFIG = {
   NEW_INPUT_MAX: 15,
   // 会话复用时的缓存分配策略
   REUSE_SCENARIOS: [
-    { threshold: 0.1, writeRatio: 0.7, variance: 0.1 }, // 10%: 约 70% 写入
-    { threshold: 0.3, writeRatio: 0.9, variance: 0.05 }, // 20%: 约 90% 写入
+    { threshold: 0.05, writeRatio: 0.7, variance: 0.1 }, // 5%: 约 70% 写入
+    { threshold: 0.1, writeRatio: 0.9, variance: 0.05 }, // 5%: 约 90% 写入
+    { threshold: 0.3, writeRatio: 0.1, variance: 0.05 }, // 20%: 约 10% 写入
     { threshold: 1.0, writeRatio: 0.3, variance: 0.1 }, // 70%: 约 30% 写入
   ],
 } as const;
@@ -77,13 +78,11 @@ export function adjustTSeriesUsage(
     if (usage.cache_creation_input_tokens != null) {
       return usage;
     }
-    const cacheCreation = usage.cache_creation_5m_input_tokens ?? 0;
+    const cacheCreation = usage.cache_creation_input_tokens ?? 0;
     return {
       ...usage,
       cache_creation_input_tokens: cacheCreation,
-      cache_creation_5m_input_tokens: cacheCreation,
-      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
-      cache_ttl: "5m",
+      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0
     };
   }
 
