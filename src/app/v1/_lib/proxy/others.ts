@@ -82,7 +82,7 @@ export function adjustTSeriesUsage(
     return {
       ...usage,
       cache_creation_input_tokens: cacheCreation,
-      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0
+      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
     };
   }
 
