@@ -1,15 +1,20 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, SquarePen } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { removeKey } from "@/actions/keys";
+import { toggleUserEnabled } from "@/actions/users";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useRouter } from "@/i18n/routing";
 import { cn } from "@/lib/utils";
+import { getContrastTextColor, getGroupColor } from "@/lib/utils/color";
 import { formatDate } from "@/lib/utils/date-format";
 import type { UserDisplay } from "@/types/user";
 import { KeyRowItem } from "./key-row-item";
@@ -28,6 +33,7 @@ export interface UserKeyTableRowProps {
   onSelectKey?: (keyId: number, checked: boolean) => void;
   onEditUser: (scrollToKeyId?: number) => void;
   onQuickRenew?: (user: UserDisplay) => void;
+  optimisticExpiresAt?: Date;
   currentUser?: { role: string };
   currencyCode?: string;
   highlightKeyIds?: Set<number>;
@@ -61,7 +67,31 @@ export interface UserKeyTableRowProps {
   };
 }
 
-const DEFAULT_GRID_COLUMNS_CLASS = "grid-cols-[minmax(260px,1fr)_120px_repeat(6,90px)_60px]";
+const DEFAULT_GRID_COLUMNS_CLASS = "grid-cols-[minmax(260px,1fr)_120px_repeat(6,90px)_80px]";
+const EXPIRING_SOON_MS = 72 * 60 * 60 * 1000; // 72小时
+const MAX_VISIBLE_GROUPS = 2; // 最多显示的分组数量
+
+function splitGroups(value?: string | null): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((g) => g.trim())
+    .filter(Boolean);
+}
+
+function getExpiryStatus(
+  isEnabled: boolean,
+  expiresAt: Date | null | undefined
+): { label: string; variant: "default" | "secondary" | "destructive" | "outline" } {
+  const now = Date.now();
+  const expTs = expiresAt?.getTime();
+  const hasExpiry = typeof expTs === "number" && Number.isFinite(expTs);
+
+  if (!isEnabled) return { label: "disabled", variant: "secondary" };
+  if (hasExpiry && expTs <= now) return { label: "expired", variant: "destructive" };
+  if (hasExpiry && expTs - now <= EXPIRING_SOON_MS)
+    return { label: "expiringSoon", variant: "outline" };
+  return { label: "active", variant: "default" };
+}
 
 function normalizeLimitValue(value: unknown): number | null {
   const raw = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
@@ -89,23 +119,50 @@ export function UserKeyTableRow({
   onSelectKey,
   onEditUser,
   onQuickRenew,
+  optimisticExpiresAt,
   currencyCode,
   highlightKeyIds,
   translations,
 }: UserKeyTableRowProps) {
   const locale = useLocale();
   const tBatchEdit = useTranslations("dashboard.userManagement.batchEdit");
+  const tUserStatus = useTranslations("dashboard.userManagement.userStatus");
   const router = useRouter();
-  const [, startTransition] = useTransition();
+  const queryClient = useQueryClient();
+  const [_isPending, startTransition] = useTransition();
+  const [isTogglingEnabled, setIsTogglingEnabled] = useState(false);
+  // 乐观更新：本地状态跟踪启用状态
+  const [localIsEnabled, setLocalIsEnabled] = useState(user.isEnabled);
+  // 乐观更新：本地状态跟踪过期时间
+  const [localExpiresAt, setLocalExpiresAt] = useState<Date | null | undefined>(user.expiresAt);
   const isExpanded = isMultiSelectMode ? true : expanded;
   const resolvedGridColumnsClass = gridColumnsClass ?? DEFAULT_GRID_COLUMNS_CLASS;
+
+  // 当props更新时同步本地状态
+  useEffect(() => {
+    setLocalIsEnabled(user.isEnabled);
+  }, [user.isEnabled]);
+
+  // 同步过期时间状态：优先使用乐观更新值，否则使用服务端数据
+  // 修复：当 optimisticExpiresAt 变为 undefined 时也能正确回滚到 user.expiresAt
+  useEffect(() => {
+    setLocalExpiresAt(optimisticExpiresAt ?? user.expiresAt);
+  }, [optimisticExpiresAt, user.expiresAt]);
 
   const keyRowTranslations = {
     ...(translations.keyRow ?? {}),
     defaultGroup: translations.defaultGroup,
   };
 
-  const expiresText = formatExpiry(user.expiresAt ?? null, locale);
+  const expiresText = formatExpiry(localExpiresAt ?? null, locale);
+
+  // 计算用户过期状态
+  const expiryStatus = getExpiryStatus(localIsEnabled, localExpiresAt ?? null);
+
+  // 处理 Provider Group：拆分成数组
+  const userGroups = splitGroups(user.providerGroup);
+  const visibleGroups = userGroups.slice(0, MAX_VISIBLE_GROUPS);
+  const remainingGroupsCount = Math.max(0, userGroups.length - MAX_VISIBLE_GROUPS);
 
   const limit5h = normalizeLimitValue(user.limit5hUsd);
   const limitDaily = normalizeLimitValue(user.dailyQuota);
@@ -118,12 +175,41 @@ export function UserKeyTableRow({
     startTransition(async () => {
       const res = await removeKey(keyId);
       if (!res.ok) {
-        toast.error(res.error || "删除失败");
+        toast.error(res.error || tUserStatus("deleteFailed"));
         return;
       }
-      toast.success("删除成功");
+      toast.success(tUserStatus("deleteSuccess"));
+      // 使 React Query 缓存失效，确保数据刷新
+      queryClient.invalidateQueries({ queryKey: ["users"] });
       router.refresh();
     });
+  };
+
+  const handleToggleUserEnabled = async (checked: boolean) => {
+    // 乐观更新：立即更新UI
+    setLocalIsEnabled(checked);
+    setIsTogglingEnabled(true);
+
+    try {
+      const res = await toggleUserEnabled(user.id, checked);
+      if (!res.ok) {
+        // 失败时回滚UI状态
+        setLocalIsEnabled(!checked);
+        toast.error(res.error || tUserStatus("operationFailed"));
+        setIsTogglingEnabled(false);
+        return;
+      }
+      toast.success(checked ? tUserStatus("userEnabled") : tUserStatus("userDisabled"));
+      // 刷新服务端数据
+      router.refresh();
+    } catch (error) {
+      // 失败时回滚UI状态
+      setLocalIsEnabled(!checked);
+      console.error("[UserKeyTableRow] toggle user enabled failed", error);
+      toast.error(tUserStatus("operationFailed"));
+    } finally {
+      setIsTogglingEnabled(false);
+    }
   };
 
   return (
@@ -173,10 +259,33 @@ export function UserKeyTableRow({
               {isExpanded ? translations.collapse : translations.expand}
             </span>
             <span className="font-medium truncate">{user.name}</span>
-            {!user.isEnabled && (
+            <Badge variant={expiryStatus.variant} className="text-[10px] shrink-0">
+              {tUserStatus(expiryStatus.label)}
+            </Badge>
+            {visibleGroups.map((group) => {
+              const bgColor = getGroupColor(group);
+              return (
+                <Badge
+                  key={group}
+                  className="text-[10px] shrink-0"
+                  style={{
+                    backgroundColor: bgColor,
+                    color: getContrastTextColor(bgColor),
+                  }}
+                >
+                  {group}
+                </Badge>
+              );
+            })}
+            {remainingGroupsCount > 0 && (
               <Badge variant="secondary" className="text-[10px] shrink-0">
-                {translations.userStatus?.disabled || "Disabled"}
+                +{remainingGroupsCount}
               </Badge>
+            )}
+            {user.tags && user.tags.length > 0 && (
+              <span className="text-xs text-muted-foreground truncate">
+                [{user.tags.join(", ")}]
+              </span>
             )}
             {user.note ? (
               <span className="text-xs text-muted-foreground truncate">{user.note}</span>
@@ -264,21 +373,45 @@ export function UserKeyTableRow({
         </div>
 
         {/* 操作 */}
-        <div className="px-2 flex items-center justify-center">
+        <div className="px-2 flex items-center justify-center gap-2">
           {isAdmin ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={translations.actions.edit}
-              title={translations.actions.edit}
-              onClick={(e) => {
-                e.stopPropagation();
-                onEditUser();
-              }}
-            >
-              <SquarePen className="h-4 w-4" />
-            </Button>
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="flex items-center"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <Switch
+                      checked={localIsEnabled}
+                      onCheckedChange={handleToggleUserEnabled}
+                      disabled={isTogglingEnabled}
+                      aria-label={tUserStatus("toggleUserStatus")}
+                      className="scale-90"
+                    />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {localIsEnabled
+                    ? tUserStatus("clickToDisableUser")
+                    : tUserStatus("clickToEnableUser")}
+                </TooltipContent>
+              </Tooltip>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={translations.actions.edit}
+                title={translations.actions.edit}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEditUser();
+                }}
+              >
+                <SquarePen className="h-4 w-4" />
+              </Button>
+            </>
           ) : null}
         </div>
       </div>

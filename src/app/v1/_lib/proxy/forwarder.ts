@@ -30,6 +30,7 @@ import {
   categorizeErrorAsync,
   EmptyResponseError,
   ErrorCategory,
+  getErrorDetectionResultAsync,
   isClientAbortError,
   isEmptyResponseError,
   isHttp2Error,
@@ -448,6 +449,23 @@ export class ProxyForwarder {
           if (errorCategory === ErrorCategory.NON_RETRYABLE_CLIENT_ERROR) {
             const proxyError = lastError as ProxyError;
             const statusCode = proxyError.statusCode;
+            const detectionResult = await getErrorDetectionResultAsync(lastError);
+            const matchedRule =
+              detectionResult.matched &&
+              detectionResult.ruleId !== undefined &&
+              detectionResult.pattern !== undefined &&
+              detectionResult.matchType !== undefined &&
+              detectionResult.category !== undefined
+                ? {
+                    ruleId: detectionResult.ruleId,
+                    pattern: detectionResult.pattern,
+                    matchType: detectionResult.matchType,
+                    category: detectionResult.category,
+                    description: detectionResult.description,
+                    hasOverrideResponse: detectionResult.overrideResponse !== undefined,
+                    hasOverrideStatusCode: detectionResult.overrideStatusCode !== undefined,
+                  }
+                : undefined;
 
             logger.warn("ProxyForwarder: Non-retryable client error, stopping immediately", {
               providerId: currentProvider.id,
@@ -478,6 +496,7 @@ export class ProxyForwarder {
                   upstreamParsed: proxyError.upstreamError?.parsed,
                 },
                 clientError: proxyError.getDetailedErrorMessage(),
+                matchedRule,
                 request: buildRequestDetails(session),
               },
             });
@@ -567,24 +586,20 @@ export class ProxyForwarder {
             break; // ⭐ 跳出内层循环，进入供应商切换逻辑
           }
 
-          // ⭐ 5. 上游 404 错误处理（不计入熔断器，直接切换供应商）
+          // ⭐ 5. 上游 404 错误处理（不计入熔断器，先重试当前供应商，重试耗尽后切换）
           if (errorCategory === ErrorCategory.RESOURCE_NOT_FOUND) {
             const proxyError = lastError as ProxyError;
+            const willRetry = attemptCount < maxAttemptsPerProvider;
 
-            logger.warn(
-              "ProxyForwarder: Upstream 404 error, switching provider without circuit breaker",
-              {
-                providerId: currentProvider.id,
-                providerName: currentProvider.name,
-                statusCode: 404,
-                error: errorMessage,
-                attemptNumber: attemptCount,
-                totalProvidersAttempted,
-              }
-            );
-
-            // 记录到失败列表（避免重新选择）
-            failedProviderIds.push(currentProvider.id);
+            logger.warn("ProxyForwarder: Upstream 404 error", {
+              providerId: currentProvider.id,
+              providerName: currentProvider.name,
+              statusCode: 404,
+              error: errorMessage,
+              attemptNumber: attemptCount,
+              totalProvidersAttempted,
+              willRetry,
+            });
 
             // 记录到决策链（标记为 resource_not_found，不计入熔断）
             session.addProviderToChain(currentProvider, {
@@ -608,26 +623,33 @@ export class ProxyForwarder {
 
             // 不调用 recordFailure()，不计入熔断器
 
+            // 未耗尽重试次数：等待 100ms 后继续重试当前供应商
+            if (willRetry) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              continue;
+            }
+
+            // 重试耗尽：加入失败列表并切换供应商
+            failedProviderIds.push(currentProvider.id);
             break; // ⭐ 跳出内层循环，进入供应商切换逻辑
           }
 
-          // ⭐ 6. 供应商错误处理（所有 4xx/5xx HTTP 错误 + 空响应错误，计入熔断器，直接切换）
+          // ⭐ 6. 供应商错误处理（所有 4xx/5xx HTTP 错误 + 空响应错误，计入熔断器，重试耗尽后切换）
           if (errorCategory === ErrorCategory.PROVIDER_ERROR) {
             // 🆕 空响应错误特殊处理（EmptyResponseError 不是 ProxyError）
             if (isEmptyResponseError(lastError)) {
               const emptyError = lastError as EmptyResponseError;
+              const willRetry = attemptCount < maxAttemptsPerProvider;
 
-              logger.warn("ProxyForwarder: Empty response detected, will switch provider", {
+              logger.warn("ProxyForwarder: Empty response detected", {
                 providerId: currentProvider.id,
                 providerName: currentProvider.name,
                 reason: emptyError.reason,
                 error: emptyError.message,
                 attemptNumber: attemptCount,
                 totalProvidersAttempted,
+                willRetry,
               });
-
-              // 记录到失败列表
-              failedProviderIds.push(currentProvider.id);
 
               // 获取熔断器健康信息
               const { health, config } = await getProviderHealthInfo(currentProvider.id);
@@ -652,17 +674,25 @@ export class ProxyForwarder {
                 },
               });
 
-              // 计入熔断器
+              // 未耗尽重试次数：等待 100ms 后继续重试当前供应商
+              if (willRetry) {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                continue;
+              }
+
+              // 重试耗尽：计入熔断器并切换供应商
               if (!session.isProbeRequest()) {
                 await recordFailure(currentProvider.id, lastError);
               }
 
+              failedProviderIds.push(currentProvider.id);
               break; // 跳出内层循环，进入供应商切换逻辑
             }
 
             // 常规 ProxyError 处理
             const proxyError = lastError as ProxyError;
             const statusCode = proxyError.statusCode;
+            const willRetry = attemptCount < maxAttemptsPerProvider;
 
             // 🆕 count_tokens 请求特殊处理：不计入熔断，不触发供应商切换
             if (session.isCountTokensRequest()) {
@@ -679,13 +709,14 @@ export class ProxyForwarder {
               throw lastError;
             }
 
-            logger.warn("ProxyForwarder: Provider error, will switch immediately", {
+            logger.warn("ProxyForwarder: Provider error occurred", {
               providerId: currentProvider.id,
               providerName: currentProvider.name,
               statusCode: statusCode,
               error: errorMessage,
               attemptNumber: attemptCount,
               totalProvidersAttempted,
+              willRetry,
             });
 
             // 🆕 特殊处理：400 + "Instructions are not valid" 错误智能重试
@@ -781,9 +812,6 @@ export class ProxyForwarder {
               }
             }
 
-            // 记录到失败列表（避免重新选择）
-            failedProviderIds.push(currentProvider.id);
-
             // 获取熔断器健康信息（用于决策链显示）
             const { health, config } = await getProviderHealthInfo(currentProvider.id);
 
@@ -809,7 +837,13 @@ export class ProxyForwarder {
               },
             });
 
-            // ⭐ 只有非探测请求才计入熔断器
+            // 未耗尽重试次数：等待 100ms 后继续重试当前供应商
+            if (willRetry) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              continue;
+            }
+
+            // ⭐ 重试耗尽：只有非探测请求才计入熔断器
             if (session.isProbeRequest()) {
               logger.debug("ProxyForwarder: Probe request error, skipping circuit breaker", {
                 providerId: currentProvider.id,
@@ -820,6 +854,8 @@ export class ProxyForwarder {
               await recordFailure(currentProvider.id, lastError);
             }
 
+            // 加入失败列表并切换供应商
+            failedProviderIds.push(currentProvider.id);
             break; // ⭐ 跳出内层循环，进入供应商切换逻辑
           }
         }
@@ -968,6 +1004,14 @@ export class ProxyForwarder {
       proxyUrl = buildProxyUrl(baseUrl, session.requestUrl);
       processedHeaders = headers;
 
+      if (session.sessionId) {
+        void SessionManager.storeSessionRequestHeaders(
+          session.sessionId,
+          processedHeaders,
+          session.requestSequence
+        ).catch((err) => logger.error("Failed to store request headers:", err));
+      }
+
       logger.debug("ProxyForwarder: Gemini request passthrough", {
         providerId: provider.id,
         type: provider.providerType,
@@ -1100,6 +1144,14 @@ export class ProxyForwarder {
       }
 
       processedHeaders = ProxyForwarder.buildHeaders(session, provider);
+
+      if (session.sessionId) {
+        void SessionManager.storeSessionRequestHeaders(
+          session.sessionId,
+          processedHeaders,
+          session.requestSequence
+        ).catch((err) => logger.error("Failed to store request headers:", err));
+      }
 
       if (process.env.NODE_ENV === "development") {
         logger.trace("ProxyForwarder: Final request headers", {
@@ -1401,7 +1453,13 @@ export class ProxyForwarder {
       // 原因：undici fetch 无法关闭自动解压，上游可能无视 accept-encoding: identity 返回 gzip
       // 当 gzip 流被提前终止时（如连接关闭），undici Gunzip 会抛出 "TypeError: terminated"
       response = useErrorTolerantFetch
-        ? await ProxyForwarder.fetchWithoutAutoDecode(proxyUrl, init, provider.id, provider.name)
+        ? await ProxyForwarder.fetchWithoutAutoDecode(
+            proxyUrl,
+            init,
+            provider.id,
+            provider.name,
+            session
+          )
         : await fetch(proxyUrl, init);
       // ⭐ fetch 成功：收到 HTTP 响应头，保留响应超时继续监控
       // 注意：undici 的 fetch 在收到 HTTP 响应头后就 resolve，但实际数据（SSE 首字节 / 完整 JSON）
@@ -1586,7 +1644,8 @@ export class ProxyForwarder {
                 proxyUrl,
                 http1FallbackInit,
                 provider.id,
-                provider.name
+                provider.name,
+                session
               )
             : await fetch(proxyUrl, http1FallbackInit);
 
@@ -1937,7 +1996,8 @@ export class ProxyForwarder {
     url: string,
     init: RequestInit & { dispatcher?: Dispatcher },
     providerId: number,
-    providerName: string
+    providerName: string,
+    session?: ProxySession
   ): Promise<Response> {
     logger.debug("ProxyForwarder: Using undici.request to bypass auto-decompression", {
       providerId,
@@ -1990,6 +2050,14 @@ export class ProxyForwarder {
       } else {
         responseHeaders.append(key, value);
       }
+    }
+
+    if (session?.sessionId) {
+      void SessionManager.storeSessionResponseHeaders(
+        session.sessionId,
+        responseHeaders,
+        session.requestSequence
+      ).catch((err) => logger.error("Failed to store response headers:", err));
     }
 
     // 检测响应是否为 gzip 压缩

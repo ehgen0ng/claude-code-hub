@@ -36,6 +36,10 @@ export interface QuickRenewDialogProps {
     currentExpiry: string;
     neverExpires: string;
     expired: string;
+    quickExtensionLabel: string;
+    quickExtensionHint: string;
+    customDateLabel: string;
+    customDateHint: string;
     quickOptions: {
       "7days": string;
       "30days": string;
@@ -48,16 +52,6 @@ export interface QuickRenewDialogProps {
     confirm: string;
     confirming: string;
   };
-}
-
-function getTranslation(translations: Record<string, unknown>, path: string, fallback: string) {
-  const value = path.split(".").reduce<unknown>((acc, key) => {
-    if (acc && typeof acc === "object" && key in (acc as Record<string, unknown>)) {
-      return (acc as Record<string, unknown>)[key];
-    }
-    return undefined;
-  }, translations);
-  return typeof value === "string" && value.trim() ? value : fallback;
 }
 
 export function QuickRenewDialog({
@@ -75,12 +69,12 @@ export function QuickRenewDialog({
   // Format current expiry for display
   const currentExpiryText = useMemo(() => {
     if (!user?.expiresAt) {
-      return getTranslation(translations, "neverExpires", "Never expires");
+      return translations.neverExpires;
     }
     const expiresAt = user.expiresAt instanceof Date ? user.expiresAt : new Date(user.expiresAt);
     const now = new Date();
     if (expiresAt <= now) {
-      return getTranslation(translations, "expired", "Expired");
+      return translations.expired;
     }
     const relative = formatDateDistance(expiresAt, now, locale, { addSuffix: true });
     const absolute = formatDate(expiresAt, "yyyy-MM-dd", locale);
@@ -159,85 +153,91 @@ export function QuickRenewDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{getTranslation(translations, "title", "Quick Renew")}</DialogTitle>
+          <DialogTitle>{translations.title}</DialogTitle>
           <DialogDescription>
-            {getTranslation(
-              translations,
-              "description",
-              "Set new expiration date for user {userName}"
-            ).replace("{userName}", user.name)}
+            {translations.description.replace("{userName}", user.name)}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           {/* Current expiry display */}
-          <div className="text-sm">
-            <span className="text-muted-foreground">
-              {getTranslation(translations, "currentExpiry", "Current Expiration")}:{" "}
-            </span>
-            <span className="font-medium">{currentExpiryText}</span>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">{translations.currentExpiry}</Label>
+            <div className="text-sm text-muted-foreground">{currentExpiryText}</div>
           </div>
 
           {/* Quick select buttons */}
-          <div className="grid grid-cols-4 gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleQuickSelect(7)}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                getTranslation(translations, "quickOptions.7days", "7 Days")
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleQuickSelect(30)}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                getTranslation(translations, "quickOptions.30days", "30 Days")
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleQuickSelect(90)}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                getTranslation(translations, "quickOptions.90days", "90 Days")
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleQuickSelect(365)}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                getTranslation(translations, "quickOptions.1year", "1 Year")
-              )}
-            </Button>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">{translations.quickExtensionLabel}</Label>
+            <div className="text-xs text-muted-foreground mb-2">
+              {translations.quickExtensionHint}
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuickSelect(7)}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  translations.quickOptions["7days"]
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuickSelect(30)}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  translations.quickOptions["30days"]
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuickSelect(90)}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  translations.quickOptions["90days"]
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuickSelect(365)}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  translations.quickOptions["1year"]
+                )}
+              </Button>
+            </div>
           </div>
 
           {/* Custom date picker */}
-          <DatePickerField
-            id="quick-renew-date"
-            label={getTranslation(translations, "customDate", "Custom Date")}
-            value={customDate}
-            onChange={setCustomDate}
-            minDate={new Date()}
-          />
+          <div className="space-y-2">
+            <Label htmlFor="quick-renew-date" className="text-sm font-medium">
+              {translations.customDateLabel}
+            </Label>
+            <div className="text-xs text-muted-foreground mb-2">{translations.customDateHint}</div>
+            <DatePickerField
+              id="quick-renew-date"
+              label=""
+              value={customDate}
+              onChange={setCustomDate}
+              minDate={new Date()}
+            />
+          </div>
 
           {/* Enable on renew switch (only show if user is disabled) */}
           {!user.isEnabled && (
@@ -248,7 +248,7 @@ export function QuickRenewDialog({
                 onCheckedChange={setEnableOnRenew}
               />
               <Label htmlFor="enable-on-renew" className="text-sm font-normal cursor-pointer">
-                {getTranslation(translations, "enableOnRenew", "Also enable user")}
+                {translations.enableOnRenew}
               </Label>
             </div>
           )}
@@ -256,16 +256,16 @@ export function QuickRenewDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isSubmitting}>
-            {getTranslation(translations, "cancel", "Cancel")}
+            {translations.cancel}
           </Button>
           <Button onClick={handleCustomConfirm} disabled={!customDate || isSubmitting}>
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                {getTranslation(translations, "confirming", "Renewing...")}
+                {translations.confirming}
               </>
             ) : (
-              getTranslation(translations, "confirm", "Confirm")
+              translations.confirm
             )}
           </Button>
         </DialogFooter>

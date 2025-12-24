@@ -593,7 +593,7 @@ export function ProviderForm({
           <CollapsibleTrigger asChild>
             <button
               type="button"
-              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors"
+              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors cursor-pointer"
               disabled={isPending}
             >
               <div className="flex items-center gap-2">
@@ -956,7 +956,7 @@ export function ProviderForm({
           <CollapsibleTrigger asChild>
             <button
               type="button"
-              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors"
+              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors cursor-pointer"
               disabled={isPending}
             >
               <div className="flex items-center gap-2">
@@ -1153,7 +1153,7 @@ export function ProviderForm({
           <CollapsibleTrigger asChild>
             <button
               type="button"
-              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors"
+              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors cursor-pointer"
               disabled={isPending}
             >
               <div className="flex items-center gap-2">
@@ -1278,7 +1278,7 @@ export function ProviderForm({
           <CollapsibleTrigger asChild>
             <button
               type="button"
-              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors"
+              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors cursor-pointer"
               disabled={isPending}
             >
               <div className="flex items-center gap-2">
@@ -1433,7 +1433,7 @@ export function ProviderForm({
           <CollapsibleTrigger asChild>
             <button
               type="button"
-              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors"
+              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors cursor-pointer"
               disabled={isPending}
             >
               <div className="flex items-center gap-2">
@@ -1524,7 +1524,7 @@ export function ProviderForm({
           <CollapsibleTrigger asChild>
             <button
               type="button"
-              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors"
+              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors cursor-pointer"
               disabled={isPending}
             >
               <div className="flex items-center gap-2">
@@ -1570,7 +1570,7 @@ export function ProviderForm({
             <CollapsibleTrigger asChild>
               <button
                 type="button"
-                className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors"
+                className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors cursor-pointer"
                 disabled={isPending}
               >
                 <div className="flex items-center gap-2">
@@ -1662,7 +1662,7 @@ export function ProviderForm({
           <CollapsibleTrigger asChild>
             <button
               type="button"
-              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors"
+              className="flex items-center justify-between w-full py-4 border-t hover:bg-muted/50 transition-colors cursor-pointer"
               disabled={isPending}
             >
               <div className="flex items-center gap-2">

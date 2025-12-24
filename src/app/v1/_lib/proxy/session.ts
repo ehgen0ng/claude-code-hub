@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { Context } from "hono";
+import { logger } from "@/lib/logger";
 import { clientRequestsContext1m as clientRequestsContext1mHelper } from "@/lib/special-attributes";
 import { findLatestPriceByModel } from "@/repository/model-price";
 import type { CacheTtlResolved } from "@/types/cache";
@@ -8,6 +9,7 @@ import type { ProviderChainItem } from "@/types/message";
 import type { ModelPriceData } from "@/types/model-price";
 import type { Provider, ProviderType } from "@/types/provider";
 import type { User } from "@/types/user";
+import { ProxyError } from "./errors";
 import type { ClientFormat } from "./format-mapper";
 
 export interface AuthState {
@@ -15,6 +17,7 @@ export interface AuthState {
   key: Key | null;
   apiKey: string | null;
   success: boolean;
+  errorResponse?: Response; // 认证失败时的详细错误响应
 }
 
 export interface MessageContext {
@@ -38,6 +41,8 @@ interface RequestBodyResult {
   requestBodyLog: string;
   requestBodyLogNote?: string;
   requestBodyBuffer?: ArrayBuffer;
+  contentLength?: number | null;
+  actualBodyBytes?: number;
 }
 
 export class ProxySession {
@@ -54,6 +59,9 @@ export class ProxySession {
   authState: AuthState | null;
   provider: Provider | null;
   messageContext: MessageContext | null;
+
+  // Time To First Byte (ms). Streaming: first chunk. Non-stream: equals durationMs.
+  ttfbMs: number | null = null;
 
   // Session ID（用于会话粘性和并发限流）
   sessionId: string | null;
@@ -144,6 +152,26 @@ export class ProxySession {
     const resolvedModel =
       modelFromBody ?? modelFromPath ?? (isLikelyGeminiRequest ? "gemini-2.5-flash" : null);
 
+    const isLargeRequestBody =
+      (bodyResult.contentLength !== null &&
+        bodyResult.contentLength !== undefined &&
+        bodyResult.contentLength >= LARGE_REQUEST_BODY_BYTES) ||
+      (bodyResult.actualBodyBytes !== undefined &&
+        bodyResult.actualBodyBytes >= LARGE_REQUEST_BODY_BYTES);
+
+    if (!resolvedModel && isLargeRequestBody) {
+      logger.warn("[ProxySession] Missing model for large request body", {
+        pathname: requestUrl.pathname,
+        contentLength: bodyResult.contentLength ?? undefined,
+        actualBodyBytes: bodyResult.actualBodyBytes ?? undefined,
+      });
+
+      throw new ProxyError(
+        "Missing required field 'model'. If you provided it, your large request body may have been truncated by the proxy body size limit. Please reduce context size or contact the administrator to increase the limit.",
+        400
+      );
+    }
+
     const request: ProxyRequestPayload = {
       message: bodyResult.requestMessage,
       buffer: bodyResult.requestBodyBuffer,
@@ -214,6 +242,22 @@ export class ProxySession {
     if (context?.user) {
       this.userName = context.user.name;
     }
+  }
+
+  /**
+   * Record Time To First Byte (TTFB) for streaming responses.
+   *
+   * Definition: first body chunk received.
+   * Non-stream responses should persist TTFB as `durationMs` at finalize time.
+   */
+  recordTtfb(): number {
+    if (this.ttfbMs !== null) {
+      return this.ttfbMs;
+    }
+
+    const value = Math.max(0, Date.now() - this.startTime);
+    this.ttfbMs = value;
+    return value;
   }
 
   /**
@@ -559,6 +603,21 @@ function extractModelFromPath(pathname: string): string | null {
   return null;
 }
 
+/**
+ * Large request body threshold (10MB)
+ * When request body exceeds this size and model field is missing,
+ * return a friendly error suggesting possible truncation by proxy limit.
+ * Related config: next.config.ts proxyClientMaxBodySize (100MB)
+ */
+const LARGE_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
+
+function parseContentLengthHeader(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 async function parseRequestBody(c: Context): Promise<RequestBodyResult> {
   const method = c.req.method.toUpperCase();
   const hasBody = method !== "GET" && method !== "HEAD";
@@ -567,8 +626,29 @@ async function parseRequestBody(c: Context): Promise<RequestBodyResult> {
     return { requestMessage: {}, requestBodyLog: "(empty)" };
   }
 
+  const contentLength = parseContentLengthHeader(c.req.header("content-length"));
   const requestBodyBuffer = await c.req.raw.clone().arrayBuffer();
+  const actualBodyBytes = requestBodyBuffer.byteLength;
   const requestBodyText = new TextDecoder().decode(requestBodyBuffer);
+
+  // Truncation detection: warn only when both conditions are met
+  // 1. Absolute difference > 1MB (avoid false positives from minor discrepancies)
+  // 2. Actual body < 80% of expected (significant truncation)
+  const MIN_TRUNCATION_DIFF_BYTES = 1024 * 1024; // 1MB
+  const TRUNCATION_RATIO_THRESHOLD = 0.8;
+  if (
+    contentLength !== null &&
+    contentLength - actualBodyBytes > MIN_TRUNCATION_DIFF_BYTES &&
+    actualBodyBytes < contentLength * TRUNCATION_RATIO_THRESHOLD
+  ) {
+    logger.warn("[parseRequestBody] Possible body truncation detected", {
+      pathname: new URL(c.req.url).pathname,
+      method,
+      contentLength,
+      actualBodyBytes,
+      ratio: (actualBodyBytes / contentLength).toFixed(2),
+    });
+  }
 
   let requestMessage: Record<string, unknown> = {};
   let requestBodyLog: string;
@@ -589,5 +669,7 @@ async function parseRequestBody(c: Context): Promise<RequestBodyResult> {
     requestBodyLog,
     requestBodyLogNote,
     requestBodyBuffer,
+    contentLength,
+    actualBodyBytes,
   };
 }

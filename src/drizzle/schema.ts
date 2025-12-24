@@ -25,7 +25,7 @@ export const users = pgTable('users', {
   role: varchar('role').default('user'),
   rpmLimit: integer('rpm_limit').default(60),
   dailyLimitUsd: numeric('daily_limit_usd', { precision: 10, scale: 2 }).default('100.00'),
-  providerGroup: varchar('provider_group', { length: 50 }),
+  providerGroup: varchar('provider_group', { length: 50 }).default('default'),
   // 用户标签（用于分类和筛选）
   tags: jsonb('tags').$type<string[]>().default([]),
 
@@ -97,8 +97,8 @@ export const keys = pgTable('keys', {
   limitTotalUsd: numeric('limit_total_usd', { precision: 10, scale: 2 }),
   limitConcurrentSessions: integer('limit_concurrent_sessions').default(0),
 
-  // Provider group override (null = inherit from user)
-  providerGroup: varchar('provider_group', { length: 50 }),
+  // Provider group for this key (explicit; defaults to "default")
+  providerGroup: varchar('provider_group', { length: 50 }).default('default'),
 
   // Cache TTL override：null/NULL 表示遵循供应商或客户端请求
   cacheTtlPreference: varchar('cache_ttl_preference', { length: 10 }),
@@ -288,6 +288,7 @@ export const messageRequest = pgTable('message_request', {
   // Token 使用信息
   inputTokens: integer('input_tokens'),
   outputTokens: integer('output_tokens'),
+  ttfbMs: integer('ttfb_ms'),
   cacheCreationInputTokens: integer('cache_creation_input_tokens'),
   cacheReadInputTokens: integer('cache_read_input_tokens'),
   cacheCreation5mInputTokens: integer('cache_creation_5m_input_tokens'),

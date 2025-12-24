@@ -437,6 +437,23 @@ const DEFAULT_ERROR_RULES = [
       },
     },
   },
+  // Issue #432: Empty message content validation error (non-retryable)
+  {
+    pattern: "all messages must have non-empty content",
+    category: "validation_error",
+    description: "Message content is empty (client error)",
+    matchType: "contains" as const,
+    isDefault: true,
+    isEnabled: true,
+    priority: 89,
+    overrideResponse: {
+      type: "error",
+      error: {
+        type: "validation_error",
+        message: "消息内容不能为空，请确保所有消息都有有效内容（最后一条 assistant 消息除外）",
+      },
+    },
+  },
   // Issue #366: Tool names must be unique (MCP server configuration error)
   {
     pattern: "Tool names must be unique",
@@ -692,8 +709,16 @@ export async function syncDefaultErrorRules(): Promise<{
 
       if (existingIsDefault === undefined) {
         // pattern 不存在，直接插入
-        await tx.insert(errorRules).values(rule);
-        counters.inserted += 1;
+        const inserted = await tx
+          .insert(errorRules)
+          .values(rule)
+          .onConflictDoNothing({ target: errorRules.pattern })
+          .returning({ id: errorRules.id });
+        if (inserted.length > 0) {
+          counters.inserted += 1;
+        } else {
+          counters.skipped += 1;
+        }
         continue;
       }
 

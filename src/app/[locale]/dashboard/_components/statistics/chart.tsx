@@ -313,7 +313,7 @@ export function UserStatisticsChart({
           <div className="flex">
             <button
               data-active={activeChart === "cost"}
-              className="data-[active=true]:bg-muted/50 relative z-30 flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l lg:border-t-0 lg:border-l lg:px-8 lg:py-6"
+              className="data-[active=true]:bg-muted/50 relative z-30 flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l lg:border-t-0 lg:border-l lg:px-8 lg:py-6 cursor-pointer"
               onClick={() => setActiveChart("cost")}
             >
               <span className="text-muted-foreground text-xs">{t("totalCost")}</span>
@@ -323,7 +323,7 @@ export function UserStatisticsChart({
             </button>
             <button
               data-active={activeChart === "calls"}
-              className="data-[active=true]:bg-muted/50 relative z-30 flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l lg:border-t-0 lg:border-l lg:px-8 lg:py-6"
+              className="data-[active=true]:bg-muted/50 relative z-30 flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l lg:border-t-0 lg:border-l lg:px-8 lg:py-6 cursor-pointer"
               onClick={() => setActiveChart("calls")}
             >
               <span className="text-muted-foreground text-xs">{t("totalCalls")}</span>
@@ -339,7 +339,7 @@ export function UserStatisticsChart({
         <div className="flex border-b">
           <button
             data-active={activeChart === "cost"}
-            className="data-[active=true]:bg-muted/50 relative z-30 flex flex-1 flex-col justify-center gap-1 px-6 py-3 text-left even:border-l transition-colors hover:bg-muted/30"
+            className="data-[active=true]:bg-muted/50 relative z-30 flex flex-1 flex-col justify-center gap-1 px-6 py-3 text-left even:border-l transition-colors hover:bg-muted/30 cursor-pointer"
             onClick={() => setActiveChart("cost")}
           >
             <span className="text-muted-foreground text-xs">{t("totalCost")}</span>
@@ -349,7 +349,7 @@ export function UserStatisticsChart({
           </button>
           <button
             data-active={activeChart === "calls"}
-            className="data-[active=true]:bg-muted/50 relative z-30 flex flex-1 flex-col justify-center gap-1 px-6 py-3 text-left even:border-l transition-colors hover:bg-muted/30"
+            className="data-[active=true]:bg-muted/50 relative z-30 flex flex-1 flex-col justify-center gap-1 px-6 py-3 text-left even:border-l transition-colors hover:bg-muted/30 cursor-pointer"
             onClick={() => setActiveChart("calls")}
           >
             <span className="text-muted-foreground text-xs">{t("totalCalls")}</span>
@@ -367,21 +367,24 @@ export function UserStatisticsChart({
               <button
                 data-active={chartMode === "overlay"}
                 onClick={() => setChartMode("overlay")}
-                className="data-[active=true]:bg-muted data-[active=true]:text-foreground text-[10px] text-muted-foreground px-1.5 py-0.5 rounded transition-colors hover:bg-muted/70"
+                className="data-[active=true]:bg-muted data-[active=true]:text-foreground text-[10px] text-muted-foreground px-1.5 py-0.5 rounded transition-colors hover:bg-muted/70 cursor-pointer"
               >
                 {t("chartMode.overlay")}
               </button>
               <button
                 data-active={chartMode === "stacked"}
                 onClick={() => setChartMode("stacked")}
-                className="data-[active=true]:bg-muted data-[active=true]:text-foreground text-[10px] text-muted-foreground px-1.5 py-0.5 rounded transition-colors hover:bg-muted/70"
+                className="data-[active=true]:bg-muted data-[active=true]:text-foreground text-[10px] text-muted-foreground px-1.5 py-0.5 rounded transition-colors hover:bg-muted/70 cursor-pointer"
               >
                 {t("chartMode.stacked")}
               </button>
             </div>
           </div>
         )}
-        <ChartContainer config={chartConfig} className="aspect-auto h-[280px] min-h-[280px] w-full">
+        <ChartContainer
+          config={chartConfig}
+          className="aspect-auto h-[320px] min-h-[320px] w-full sm:h-[400px] sm:min-h-[400px]"
+        >
           <AreaChart
             data={numericChartData}
             margin={{
@@ -542,7 +545,7 @@ export function UserStatisticsChart({
                       </span>
                     </div>
                   )}
-                  <div className="flex flex-wrap justify-center gap-1">
+                  <div className="flex flex-wrap justify-center gap-1 max-h-[150px] overflow-y-auto p-1">
                     {sortedLegendUsers.map(({ user, index }) => {
                       const color = getUserColor(index);
                       const userTotal = userTotals[user.dataKey] ?? {
@@ -552,12 +555,14 @@ export function UserStatisticsChart({
                       const isSelected = selectedUserIds.has(user.id);
 
                       return (
-                        <div
+                        <button
+                          type="button"
                           key={user.dataKey}
-                          onClick={() => enableUserFilter && toggleUserSelection(user.id)}
+                          onClick={() => toggleUserSelection(user.id)}
+                          disabled={!enableUserFilter}
+                          aria-pressed={isSelected}
                           className={cn(
-                            "rounded-md px-3 py-2 text-center transition-all min-w-16",
-                            enableUserFilter && "cursor-pointer",
+                            "rounded-md px-3 py-2 text-center transition-all min-w-16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-default",
                             isSelected
                               ? "bg-muted/50 hover:bg-muted/70 ring-1 ring-border"
                               : "bg-muted/10 hover:bg-muted/30 opacity-50"
@@ -568,6 +573,7 @@ export function UserStatisticsChart({
                             <div
                               className="h-2 w-2 rounded-full flex-shrink-0"
                               style={{ backgroundColor: color }}
+                              aria-hidden="true"
                             />
                             <span className="text-xs font-medium text-foreground truncate max-w-12">
                               {user.name}
@@ -580,7 +586,7 @@ export function UserStatisticsChart({
                               ? formatCurrency(userTotal.cost, currencyCode)
                               : userTotal.calls.toLocaleString()}
                           </div>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>

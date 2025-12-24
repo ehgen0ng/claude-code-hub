@@ -40,6 +40,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { PROVIDER_GROUP } from "@/lib/constants/provider.constants";
 import { useZodForm } from "@/lib/hooks/use-zod-form";
 import { KeyFormSchema, UpdateUserSchema } from "@/lib/validation/schemas";
 import type { UserDisplay } from "@/types/user";
@@ -102,6 +103,21 @@ function getKeyExpiresAtIso(expiresAt: string): string | undefined {
   return parsed.toISOString();
 }
 
+function normalizeProviderGroup(value: unknown): string {
+  if (value === null || value === undefined) return PROVIDER_GROUP.DEFAULT;
+  if (typeof value !== "string") return PROVIDER_GROUP.DEFAULT;
+  const trimmed = value.trim();
+  if (trimmed === "") return PROVIDER_GROUP.DEFAULT;
+
+  const groups = trimmed
+    .split(",")
+    .map((g) => g.trim())
+    .filter(Boolean);
+  if (groups.length === 0) return PROVIDER_GROUP.DEFAULT;
+
+  return Array.from(new Set(groups)).sort().join(",");
+}
+
 function buildDefaultValues(
   mode: "create" | "edit",
   user?: UserDisplay,
@@ -132,7 +148,7 @@ function buildDefaultValues(
           isEnabled: true,
           expiresAt: undefined,
           canLoginWebUi: false,
-          providerGroup: keyOnlyMode ? user?.providerGroup || "" : "",
+          providerGroup: PROVIDER_GROUP.DEFAULT,
           cacheTtlPreference: "inherit" as const,
           limit5hUsd: null,
           limitDailyUsd: null,
@@ -158,7 +174,7 @@ function buildDefaultValues(
       note: user.note || "",
       tags: user.tags || [],
       expiresAt: user.expiresAt ?? undefined,
-      providerGroup: user.providerGroup ?? null,
+      providerGroup: normalizeProviderGroup(user.providerGroup),
       limit5hUsd: user.limit5hUsd ?? null,
       dailyQuota: user.dailyQuota ?? null,
       limitWeeklyUsd: user.limitWeeklyUsd ?? null,
@@ -176,7 +192,7 @@ function buildDefaultValues(
       isEnabled: key.status === "enabled",
       expiresAt: getKeyExpiresAtIso(key.expiresAt),
       canLoginWebUi: key.canLoginWebUi ?? false,
-      providerGroup: key.providerGroup || "",
+      providerGroup: normalizeProviderGroup(key.providerGroup),
       cacheTtlPreference: "inherit" as const,
       limit5hUsd: key.limit5hUsd ?? null,
       limitDailyUsd: key.limitDailyUsd ?? null,
@@ -259,7 +275,7 @@ function UnifiedEditDialogInner({
   );
 
   const userProviderGroups = useMemo(() => {
-    return (user?.providerGroup ?? "")
+    return normalizeProviderGroup(user?.providerGroup)
       .split(",")
       .map((g) => g.trim())
       .filter(Boolean);
@@ -283,6 +299,15 @@ function UnifiedEditDialogInner({
     onSubmit: async (data) => {
       startTransition(async () => {
         try {
+          // 验证: 编辑模式下,至少需要一个启用的 key(防止用户禁用所有 key)
+          if (mode === "edit") {
+            const enabledKeyCount = data.keys.filter((k) => k.isEnabled).length;
+            if (enabledKeyCount === 0) {
+              toast.error(t("editDialog.atLeastOneKeyEnabled"));
+              return;
+            }
+          }
+
           if (mode === "create") {
             if (isKeyOnlyMode) {
               const targetUserId = user?.id ?? currentUser?.id;
@@ -297,7 +322,7 @@ function UnifiedEditDialogInner({
                   name: key.name,
                   expiresAt: key.expiresAt || undefined,
                   canLoginWebUi: key.canLoginWebUi,
-                  providerGroup: key.providerGroup?.trim() ? key.providerGroup.trim() : null,
+                  providerGroup: normalizeProviderGroup(key.providerGroup),
                   cacheTtlPreference: key.cacheTtlPreference,
                   limit5hUsd: key.limit5hUsd,
                   limitDailyUsd: key.limitDailyUsd,
@@ -350,7 +375,7 @@ function UnifiedEditDialogInner({
                   name: key.name,
                   expiresAt: key.expiresAt || undefined,
                   canLoginWebUi: key.canLoginWebUi,
-                  providerGroup: key.providerGroup?.trim() ? key.providerGroup.trim() : null,
+                  providerGroup: normalizeProviderGroup(key.providerGroup),
                   cacheTtlPreference: key.cacheTtlPreference,
                   limit5hUsd: key.limit5hUsd,
                   limitDailyUsd: key.limitDailyUsd,
@@ -387,7 +412,7 @@ function UnifiedEditDialogInner({
                 note: data.user.note,
                 tags: data.user.tags,
                 expiresAt: data.user.expiresAt ?? null,
-                providerGroup: data.user.providerGroup ?? null,
+                providerGroup: normalizeProviderGroup(data.user.providerGroup),
                 limit5hUsd: data.user.limit5hUsd,
                 dailyQuota: data.user.dailyQuota,
                 limitWeeklyUsd: data.user.limitWeeklyUsd,
@@ -413,8 +438,9 @@ function UnifiedEditDialogInner({
                   userId: user.id,
                   name: key.name,
                   expiresAt: key.expiresAt || undefined,
+                  isEnabled: key.isEnabled,
                   canLoginWebUi: key.canLoginWebUi,
-                  providerGroup: key.providerGroup?.trim() ? key.providerGroup.trim() : null,
+                  providerGroup: normalizeProviderGroup(key.providerGroup),
                   cacheTtlPreference: key.cacheTtlPreference,
                   limit5hUsd: key.limit5hUsd,
                   limitDailyUsd: key.limitDailyUsd,
@@ -438,7 +464,7 @@ function UnifiedEditDialogInner({
                   expiresAt: key.expiresAt || undefined,
                   canLoginWebUi: key.canLoginWebUi,
                   isEnabled: key.isEnabled,
-                  providerGroup: key.providerGroup?.trim() ? key.providerGroup.trim() : null,
+                  providerGroup: normalizeProviderGroup(key.providerGroup),
                   cacheTtlPreference: key.cacheTtlPreference,
                   limit5hUsd: key.limit5hUsd,
                   limitDailyUsd: key.limitDailyUsd,
@@ -716,7 +742,7 @@ function UnifiedEditDialogInner({
       isEnabled: true,
       expiresAt: undefined,
       canLoginWebUi: true,
-      providerGroup: "",
+      providerGroup: PROVIDER_GROUP.DEFAULT,
       cacheTtlPreference: "inherit" as const,
       limit5hUsd: null,
       limitDailyUsd: null,
@@ -849,7 +875,7 @@ function UnifiedEditDialogInner({
                   description: currentUserDraft.note || "",
                   tags: currentUserDraft.tags || [],
                   expiresAt: currentUserDraft.expiresAt ?? null,
-                  providerGroup: currentUserDraft.providerGroup ?? null,
+                  providerGroup: normalizeProviderGroup(currentUserDraft.providerGroup),
                   limit5hUsd: currentUserDraft.limit5hUsd ?? null,
                   dailyQuota: currentUserDraft.dailyQuota ?? null,
                   limitWeeklyUsd: currentUserDraft.limitWeeklyUsd ?? null,
@@ -900,6 +926,9 @@ function UnifiedEditDialogInner({
                 const isExpanded =
                   mode === "create" || keys.length === 1 || expandedKeyIds.has(key.id);
                 const showCollapseButton = mode === "edit" && keys.length > 1;
+                // 计算当前是否是最后一个启用的 key
+                const enabledKeysCount = keys.filter((k) => k.isEnabled).length;
+                const isLastEnabledKey = key.isEnabled && enabledKeysCount === 1;
 
                 return (
                   <div
@@ -941,11 +970,9 @@ function UnifiedEditDialogInner({
                           <Badge variant={key.isEnabled ? "default" : "secondary"}>
                             {key.isEnabled ? t("keyStatus.enabled") : t("keyStatus.disabled")}
                           </Badge>
-                          {key.providerGroup && (
-                            <span className="text-sm text-muted-foreground truncate">
-                              {key.providerGroup}
-                            </span>
-                          )}
+                          <span className="text-sm text-muted-foreground truncate">
+                            {normalizeProviderGroup(key.providerGroup)}
+                          </span>
                         </div>
                         {showCollapseButton && (
                           <Button type="button" variant="ghost" size="sm">
@@ -977,7 +1004,7 @@ function UnifiedEditDialogInner({
                             isEnabled: key.isEnabled ?? true,
                             expiresAt: key.expiresAt ? new Date(key.expiresAt) : null,
                             canLoginWebUi: key.canLoginWebUi ?? false,
-                            providerGroup: key.providerGroup || "",
+                            providerGroup: normalizeProviderGroup(key.providerGroup),
                             cacheTtlPreference: key.cacheTtlPreference ?? "inherit",
                             limit5hUsd: key.limit5hUsd ?? null,
                             limitDailyUsd: key.limitDailyUsd ?? null,
@@ -989,6 +1016,7 @@ function UnifiedEditDialogInner({
                             limitConcurrentSessions: key.limitConcurrentSessions ?? 0,
                           }}
                           isAdmin={isAdmin}
+                          isLastEnabledKey={isLastEnabledKey}
                           userProviderGroup={user?.providerGroup ?? undefined}
                           onChange={
                             ((fieldOrBatch: string | Record<string, any>, value?: any) =>

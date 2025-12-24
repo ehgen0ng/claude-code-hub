@@ -114,12 +114,14 @@ export function TagInput({
   );
 
   const addTag = React.useCallback(
-    (tag: string) => {
+    (tag: string, keepOpen = false) => {
       const trimmedTag = tag.trim();
       if (handleValidateTag(trimmedTag, value)) {
         onChange([...value, trimmedTag]);
         setInputValue("");
-        setShowSuggestions(false);
+        if (!keepOpen) {
+          setShowSuggestions(false);
+        }
         setHighlightedIndex(-1);
       }
     },
@@ -174,7 +176,7 @@ export function TagInput({
         }
         if (e.key === "Enter" && highlightedIndex >= 0) {
           e.preventDefault();
-          addTag(filteredSuggestions[highlightedIndex].value);
+          addTag(filteredSuggestions[highlightedIndex].value, true); // keepOpen=true 保持下拉展开
           return;
         }
         if (e.key === "Escape") {
@@ -254,7 +256,7 @@ export function TagInput({
 
   const handleSuggestionClick = React.useCallback(
     (suggestionValue: string) => {
-      addTag(suggestionValue);
+      addTag(suggestionValue, true); // keepOpen=true 保持下拉展开
       inputRef.current?.focus();
     },
     [addTag]
@@ -282,7 +284,7 @@ export function TagInput({
             {!disabled && (
               <button
                 type="button"
-                className="ml-1 rounded-full outline-none hover:bg-muted-foreground/20 focus:ring-2 focus:ring-ring/50"
+                className="ml-1 rounded-full outline-none hover:bg-muted-foreground/20 focus:ring-2 focus:ring-ring/50 cursor-pointer"
                 onClick={(e) => {
                   e.stopPropagation();
                   removeTag(index);
@@ -320,7 +322,7 @@ export function TagInput({
               key={suggestion.value}
               type="button"
               className={cn(
-                "w-full px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground",
+                "w-full px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer",
                 index === highlightedIndex && "bg-accent text-accent-foreground"
               )}
               onMouseDown={(e) => {
