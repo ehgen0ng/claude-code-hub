@@ -40,6 +40,7 @@ import { mapClientFormatToTransformer, mapProviderTypeToTransformer } from "./fo
 import { ModelRedirector } from "./model-redirector";
 import { ProxyProviderResolver } from "./provider-selector";
 import type { ProxySession } from "./session";
+import { applyUserIdPoolMapping, getUserAgentOverride } from "./others";
 
 const STANDARD_ENDPOINTS = [
   "/v1/messages",
@@ -452,19 +453,19 @@ export class ProxyForwarder {
             const detectionResult = await getErrorDetectionResultAsync(lastError);
             const matchedRule =
               detectionResult.matched &&
-              detectionResult.ruleId !== undefined &&
-              detectionResult.pattern !== undefined &&
-              detectionResult.matchType !== undefined &&
-              detectionResult.category !== undefined
+                detectionResult.ruleId !== undefined &&
+                detectionResult.pattern !== undefined &&
+                detectionResult.matchType !== undefined &&
+                detectionResult.category !== undefined
                 ? {
-                    ruleId: detectionResult.ruleId,
-                    pattern: detectionResult.pattern,
-                    matchType: detectionResult.matchType,
-                    category: detectionResult.category,
-                    description: detectionResult.description,
-                    hasOverrideResponse: detectionResult.overrideResponse !== undefined,
-                    hasOverrideStatusCode: detectionResult.overrideStatusCode !== undefined,
-                  }
+                  ruleId: detectionResult.ruleId,
+                  pattern: detectionResult.pattern,
+                  matchType: detectionResult.matchType,
+                  category: detectionResult.category,
+                  description: detectionResult.description,
+                  hasOverrideResponse: detectionResult.overrideResponse !== undefined,
+                  hasOverrideStatusCode: detectionResult.overrideStatusCode !== undefined,
+                }
                 : undefined;
 
             logger.warn("ProxyForwarder: Non-retryable client error, stopping immediately", {
@@ -1237,53 +1238,8 @@ export class ProxyForwarder {
 
       if (hasBody) {
         const filteredMessage = filterPrivateParameters(session.request.message);
-        if (typeof filteredMessage === "object" && filteredMessage !== null) {
-          const msg = filteredMessage as Record<string, unknown>;
-
-          const filterUndefined = (obj: Record<string, unknown>) =>
-            Object.fromEntries(Object.entries(obj).filter(([_, v]) => v !== undefined));
-
-          const userIdentifiers = {
-            metadataUserId:
-              msg.metadata && typeof msg.metadata === "object"
-                ? (msg.metadata as Record<string, unknown>).user_id
-                : undefined,
-          };
-
-          if (provider.websiteUrl && !provider.websiteUrl.toLowerCase().startsWith("http")) {
-            const beforeOverride = { ...userIdentifiers };
-
-            if (msg.metadata && typeof msg.metadata === "object") {
-              (msg.metadata as Record<string, unknown>).user_id = provider.websiteUrl;
-            }
-
-            const afterOverride = {
-              metadataUserId:
-                msg.metadata && typeof msg.metadata === "object"
-                  ? (msg.metadata as Record<string, unknown>).user_id
-                  : undefined,
-            };
-
-            logger.info("ProxyForwarder: User identifier override applied", {
-              providerId: provider.id,
-              providerName: provider.name,
-              websiteUrl: provider.websiteUrl,
-              before: filterUndefined(beforeOverride),
-              after: filterUndefined(afterOverride),
-            });
-          } else {
-            const filteredIdentifiers = filterUndefined(userIdentifiers);
-            if (Object.keys(filteredIdentifiers).length > 0) {
-              logger.info("ProxyForwarder: User identifiers (no override)", {
-                providerId: provider.id,
-                providerName: provider.name,
-                websiteUrl: provider.websiteUrl || "(empty)",
-                identifiers: filteredIdentifiers,
-              });
-            }
-          }
-        }
-
+        // user_id 池管理
+        await applyUserIdPoolMapping(provider, session, filteredMessage);
         const bodyString = JSON.stringify(filteredMessage);
         requestBody = bodyString;
 
@@ -1454,12 +1410,12 @@ export class ProxyForwarder {
       // 当 gzip 流被提前终止时（如连接关闭），undici Gunzip 会抛出 "TypeError: terminated"
       response = useErrorTolerantFetch
         ? await ProxyForwarder.fetchWithoutAutoDecode(
-            proxyUrl,
-            init,
-            provider.id,
-            provider.name,
-            session
-          )
+          proxyUrl,
+          init,
+          provider.id,
+          provider.name,
+          session
+        )
         : await fetch(proxyUrl, init);
       // ⭐ fetch 成功：收到 HTTP 响应头，保留响应超时继续监控
       // 注意：undici 的 fetch 在收到 HTTP 响应头后就 resolve，但实际数据（SSE 首字节 / 完整 JSON）
@@ -1641,12 +1597,12 @@ export class ProxyForwarder {
           // 使用 HTTP/1.1 重试
           response = useErrorTolerantFetch
             ? await ProxyForwarder.fetchWithoutAutoDecode(
-                proxyUrl,
-                http1FallbackInit,
-                provider.id,
-                provider.name,
-                session
-              )
+              proxyUrl,
+              http1FallbackInit,
+              provider.id,
+              provider.name,
+              session
+            )
             : await fetch(proxyUrl, http1FallbackInit);
 
           logger.info("ProxyForwarder: HTTP/1.1 fallback succeeded", {
@@ -1902,6 +1858,12 @@ export class ProxyForwarder {
       logger.debug("ProxyForwarder: Codex provider detected, setting User-Agent", {
         originalUA: session.userAgent ? "provided" : "fallback",
       });
+    }
+
+    // User-Agent 覆盖（针对特定供应商）
+    const userAgentOverride = getUserAgentOverride(provider);
+    if (userAgentOverride) {
+      overrides["user-agent"] = userAgentOverride;
     }
 
     if (preserveClientIp) {
