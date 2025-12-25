@@ -453,19 +453,19 @@ export class ProxyForwarder {
             const detectionResult = await getErrorDetectionResultAsync(lastError);
             const matchedRule =
               detectionResult.matched &&
-                detectionResult.ruleId !== undefined &&
-                detectionResult.pattern !== undefined &&
-                detectionResult.matchType !== undefined &&
-                detectionResult.category !== undefined
+              detectionResult.ruleId !== undefined &&
+              detectionResult.pattern !== undefined &&
+              detectionResult.matchType !== undefined &&
+              detectionResult.category !== undefined
                 ? {
-                  ruleId: detectionResult.ruleId,
-                  pattern: detectionResult.pattern,
-                  matchType: detectionResult.matchType,
-                  category: detectionResult.category,
-                  description: detectionResult.description,
-                  hasOverrideResponse: detectionResult.overrideResponse !== undefined,
-                  hasOverrideStatusCode: detectionResult.overrideStatusCode !== undefined,
-                }
+                    ruleId: detectionResult.ruleId,
+                    pattern: detectionResult.pattern,
+                    matchType: detectionResult.matchType,
+                    category: detectionResult.category,
+                    description: detectionResult.description,
+                    hasOverrideResponse: detectionResult.overrideResponse !== undefined,
+                    hasOverrideStatusCode: detectionResult.overrideStatusCode !== undefined,
+                  }
                 : undefined;
 
             logger.warn("ProxyForwarder: Non-retryable client error, stopping immediately", {
@@ -1410,12 +1410,12 @@ export class ProxyForwarder {
       // 当 gzip 流被提前终止时（如连接关闭），undici Gunzip 会抛出 "TypeError: terminated"
       response = useErrorTolerantFetch
         ? await ProxyForwarder.fetchWithoutAutoDecode(
-          proxyUrl,
-          init,
-          provider.id,
-          provider.name,
-          session
-        )
+            proxyUrl,
+            init,
+            provider.id,
+            provider.name,
+            session
+          )
         : await fetch(proxyUrl, init);
       // ⭐ fetch 成功：收到 HTTP 响应头，保留响应超时继续监控
       // 注意：undici 的 fetch 在收到 HTTP 响应头后就 resolve，但实际数据（SSE 首字节 / 完整 JSON）
@@ -1597,12 +1597,12 @@ export class ProxyForwarder {
           // 使用 HTTP/1.1 重试
           response = useErrorTolerantFetch
             ? await ProxyForwarder.fetchWithoutAutoDecode(
-              proxyUrl,
-              http1FallbackInit,
-              provider.id,
-              provider.name,
-              session
-            )
+                proxyUrl,
+                http1FallbackInit,
+                provider.id,
+                provider.name,
+                session
+              )
             : await fetch(proxyUrl, http1FallbackInit);
 
           logger.info("ProxyForwarder: HTTP/1.1 fallback succeeded", {
