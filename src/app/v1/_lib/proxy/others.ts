@@ -175,9 +175,10 @@ function shouldApplyUserIdPool(provider: Provider): boolean {
 /**
  * 获取供应商的 User-Agent 覆盖值
  * 如果供应商需要特殊的 User-Agent，返回覆盖值；否则返回 null
+ * 只对 Claude 类型供应商生效
  */
 export function getUserAgentOverride(provider: Provider): string | null {
-  if (shouldApplyUserIdPool(provider)) {
+  if (provider.providerType === "claude" && shouldApplyUserIdPool(provider)) {
     return USER_POOL_CONFIG.USER_AGENT;
   }
   return null;
