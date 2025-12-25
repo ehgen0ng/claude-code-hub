@@ -149,10 +149,13 @@ export function adjustTSeriesUsage(
 
 // =============== 供应商 User ID 池管理 ===============
 // Redis 数据结构：
-//   - user_pool:*:ids      ZSET  存储 user_id 池
+//   - user_pool:*:ids      ZSET  存储 user_id 池 (member=user_id, score=timestamp_ms)
 //   - user_pool:*:bindings HASH  存储 session->user_id 绑定关系
-// 查看所有绑定关系：
-//   for key in $(redis-cli KEYS "user_pool:*:bindings"); do echo "=== $key ==="; redis-cli HGETALL "$key"; done
+// 查看命令：
+//   1. 查看 user_id 池及剩余时间（分钟）：
+//      now=$(date +%s); for key in $(redis-cli KEYS "user_pool:*:ids"); do echo "=== $key ==="; redis-cli ZRANGE "$key" 0 -1 WITHSCORES | paste - - | while read uid ts; do left=$(((ts/1000+1800-now)/60)); echo "$uid (${left}m left)"; done; done
+//   2. 查看 session 绑定（按 user_id 分组）：
+//      for key in $(redis-cli KEYS "user_pool:*:bindings"); do echo "=== $key ==="; redis-cli HGETALL "$key" | paste - - | awk -F'\t' '{a[$2]=a[$2]"  "$1"\n"} END{for(u in a) print u":\n"a[u]}'; done
 
 const USER_POOL_CONFIG = {
   POOL_MAX_SIZE: 3,
@@ -228,7 +231,7 @@ async function getUserIdFromPool(
 ): Promise<string | null> {
   const redis = getRedisClient();
   if (!redis || redis.status !== "ready") {
-    logger.debug("UserIdPool: Redis not ready, skipping", { providerId });
+    logger.info("UserIdPool: Redis not ready, skipping", { providerId });
     return null;
   }
 
@@ -243,8 +246,25 @@ async function getUserIdFromPool(
 
     // 2. 获取当前池中所有 user_id
     const members = await redis.zrange(poolKey, 0, -1);
+    const memberSet = new Set(members);
 
-    // 3. 优先复用：如果请求的 user_id 已在池中
+    // 3. 清理 bindings 中指向已过期 user_id 的记录
+    const bindings = await redis.hgetall(bindingsKey);
+    const staleKeys: string[] = [];
+    for (const [sid, uid] of Object.entries(bindings)) {
+      if (!memberSet.has(uid)) {
+        staleKeys.push(sid);
+      }
+    }
+    if (staleKeys.length > 0) {
+      await redis.hdel(bindingsKey, ...staleKeys);
+      logger.info("UserIdPool: Cleaned stale bindings", {
+        providerId,
+        count: staleKeys.length,
+      });
+    }
+
+    // 4. 优先复用：如果请求的 user_id 已在池中
     if (currentUserId && members.includes(currentUserId)) {
       // 刷新过期时间
       await redis.zadd(poolKey, now, currentUserId);
@@ -253,14 +273,14 @@ async function getUserIdFromPool(
       await redis.hset(bindingsKey, sessionId, currentUserId);
       await redis.expire(bindingsKey, USER_POOL_CONFIG.TTL_SECONDS);
 
-      logger.debug("UserIdPool: Reusing existing user_id from pool", {
+      logger.info("UserIdPool: Reusing existing user_id from pool", {
         providerId,
         poolSize: members.length,
       });
       return currentUserId;
     }
 
-    // 4. 尝试收集：池未满时添加新 user_id
+    // 5. 尝试收集：池未满时添加新 user_id
     if (currentUserId && members.length < USER_POOL_CONFIG.POOL_MAX_SIZE) {
       await redis.zadd(poolKey, "NX", now, currentUserId);
       await redis.expire(poolKey, USER_POOL_CONFIG.TTL_SECONDS);
@@ -275,9 +295,9 @@ async function getUserIdFromPool(
       return currentUserId;
     }
 
-    // 5. 兜底映射：池已满或无 currentUserId，用 hash 映射
+    // 6. 兜底映射：池已满或无 currentUserId，用 hash 映射
     if (members.length === 0) {
-      logger.debug("UserIdPool: Pool is empty", { providerId });
+      logger.info("UserIdPool: Pool is empty", { providerId });
       return null;
     }
 
@@ -289,7 +309,7 @@ async function getUserIdFromPool(
     await redis.hset(bindingsKey, sessionId, mappedUserId);
     await redis.expire(bindingsKey, USER_POOL_CONFIG.TTL_SECONDS);
 
-    logger.debug("UserIdPool: Mapped session to user_id via hash", {
+    logger.info("UserIdPool: Mapped session to user_id via hash", {
       providerId,
       poolSize: members.length,
       selectedIndex: index,
@@ -340,7 +360,7 @@ export async function applyUserIdPoolMapping(
         msg.metadata = { user_id: mappedUserId };
       }
 
-      logger.debug("UserIdPool: Mapping applied", {
+      logger.info("UserIdPool: Mapping applied", {
         providerId: provider.id,
         providerName: provider.name,
         sessionId: sessionId.substring(0, 20) + "...",
