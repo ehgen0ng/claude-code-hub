@@ -310,7 +310,8 @@ export class ProxyResponseHandler {
         const usageResult = parseUsageFromResponseText(responseText, provider.providerType);
         usageRecord = usageResult.usageRecord;
         // ⭐ 优先使用已调整的 usage（与用户响应一致），避免二次随机导致计费不一致
-        usageMetrics = tSeriesAdjustedUsage ?? adjustTSeriesUsage(usageResult.usageMetrics, provider, session);
+        usageMetrics =
+          tSeriesAdjustedUsage ?? adjustTSeriesUsage(usageResult.usageMetrics, provider, session);
 
         // Codex: Extract prompt_cache_key and update session binding
         if (provider.providerType === "codex" && session.sessionId && provider.id) {
