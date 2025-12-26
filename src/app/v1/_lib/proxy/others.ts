@@ -150,62 +150,59 @@ export function adjustTSeriesUsage(
 // =============== T 系列响应体 Usage 调整 ===============
 
 /**
- * 调整非流式响应体中的 usage 字段
+ * T 系列非流式响应调整结果
  */
-function adjustTSeriesResponseBody(
-  responseBody: unknown,
-  provider: Provider,
-  session: ProxySession
-): unknown {
-  if (!responseBody || typeof responseBody !== "object") {
-    return responseBody;
-  }
-
-  const body = responseBody as Record<string, unknown>;
-  if (!body.usage || typeof body.usage !== "object") {
-    return responseBody;
-  }
-
-  const adjustedUsage = adjustTSeriesUsage(body.usage as UsageMetrics, provider, session);
-  return adjustedUsage ? { ...body, usage: adjustedUsage } : responseBody;
+export interface TSeriesAdjustResult {
+  response: Response;
+  /** 调整后的 usage（如果进行了调整），用于计费 */
+  adjustedUsage: UsageMetrics | null;
 }
 
 /**
  * 调整 T 系列非流式响应的 usage
  * 封装完整的 Response 处理逻辑，供 response-handler 调用
+ * 返回调整后的 Response 和 UsageMetrics，确保用户响应和计费使用相同的值
  */
 export async function adjustTSeriesNonStreamResponse(
   response: Response,
   provider: Provider | null,
   session: ProxySession,
   cleanHeaders?: (headers: Headers) => Headers
-): Promise<Response> {
+): Promise<TSeriesAdjustResult> {
   if (!provider || !isTSeriesProvider(provider)) {
-    return response;
+    return { response, adjustedUsage: null };
   }
 
   // 检查 Content-Type，非 JSON 响应直接返回
   const contentType = response.headers.get("content-type");
   if (!contentType?.includes("application/json")) {
-    return response;
+    return { response, adjustedUsage: null };
   }
 
   try {
     const cloned = response.clone();
     const text = await cloned.text();
     const parsed = JSON.parse(text) as Record<string, unknown>;
-    const adjusted = adjustTSeriesResponseBody(parsed, provider, session);
-    if (adjusted !== parsed) {
+    const originalUsage = parsed.usage as UsageMetrics | undefined;
+    const adjustedUsage = originalUsage
+      ? adjustTSeriesUsage(originalUsage, provider, session)
+      : null;
+
+    if (adjustedUsage && adjustedUsage !== originalUsage) {
+      const adjusted = { ...parsed, usage: adjustedUsage };
       logger.info("[TSeriesNonStream] Usage adjusted", {
         providerId: provider.id,
         providerName: provider.name,
         sessionId: session.sessionId?.substring(0, 20),
       });
-      return new Response(JSON.stringify(adjusted), {
-        status: response.status,
-        statusText: response.statusText,
-        headers: cleanHeaders ? cleanHeaders(response.headers) : response.headers,
-      });
+      return {
+        response: new Response(JSON.stringify(adjusted), {
+          status: response.status,
+          statusText: response.statusText,
+          headers: cleanHeaders ? cleanHeaders(response.headers) : response.headers,
+        }),
+        adjustedUsage,
+      };
     }
   } catch (error) {
     logger.error("[TSeriesNonStream] Failed to parse response", {
@@ -214,7 +211,7 @@ export async function adjustTSeriesNonStreamResponse(
     });
   }
 
-  return response;
+  return { response, adjustedUsage: null };
 }
 
 /**
@@ -259,12 +256,9 @@ export function createTSeriesStreamTransform(
           // 直接解析 JSON，而不是使用 parseSSEData（返回数组，不适用于此场景）
           const parsed = JSON.parse(dataContent) as Record<string, unknown>;
           if (parsed && typeof parsed === "object" && "usage" in parsed && parsed.usage) {
-            const adjustedUsage = adjustTSeriesUsage(
-              parsed.usage as UsageMetrics,
-              provider,
-              session
-            );
-            if (adjustedUsage) {
+            const originalUsage = parsed.usage as UsageMetrics;
+            const adjustedUsage = adjustTSeriesUsage(originalUsage, provider, session);
+            if (adjustedUsage && adjustedUsage !== originalUsage) {
               const modified = { ...parsed, usage: adjustedUsage };
               controller.enqueue(encoder.encode(`data: ${JSON.stringify(modified)}\n`));
               logger.info("[TSeriesTransform] Usage adjusted in SSE event", {

@@ -24,6 +24,7 @@ import {
   adjustTSeriesUsage,
   adjustTSeriesNonStreamResponse,
   createTSeriesStreamTransform,
+  type TSeriesAdjustResult,
 } from "./others";
 import type { ProxySession } from "./session";
 
@@ -229,12 +230,15 @@ export class ProxyResponseHandler {
     }
 
     // ⭐ T 系列供应商：调整响应体中的 usage，让用户看到调整后的值
-    finalResponse = await adjustTSeriesNonStreamResponse(
+    const tSeriesResult = await adjustTSeriesNonStreamResponse(
       finalResponse,
       provider,
       session,
       finalResponse === response ? cleanResponseHeaders : undefined
     );
+    finalResponse = tSeriesResult.response;
+    // 保存调整后的 usage，供计费使用（避免二次调用 adjustTSeriesUsage 产生不同随机值）
+    const tSeriesAdjustedUsage = tSeriesResult.adjustedUsage;
 
     // 使用 AsyncTaskManager 管理后台处理任务
     const taskId = `non-stream-${messageContext?.id || `unknown-${Date.now()}`}`;
@@ -305,7 +309,8 @@ export class ProxyResponseHandler {
 
         const usageResult = parseUsageFromResponseText(responseText, provider.providerType);
         usageRecord = usageResult.usageRecord;
-        usageMetrics = adjustTSeriesUsage(usageResult.usageMetrics, provider, session);
+        // ⭐ 优先使用已调整的 usage（与用户响应一致），避免二次随机导致计费不一致
+        usageMetrics = tSeriesAdjustedUsage ?? adjustTSeriesUsage(usageResult.usageMetrics, provider, session);
 
         // Codex: Extract prompt_cache_key and update session binding
         if (provider.providerType === "codex" && session.sessionId && provider.id) {
@@ -878,7 +883,8 @@ export class ProxyResponseHandler {
         tracker.endRequest(messageContext.user.id, messageContext.id);
 
         const usageResult = parseUsageFromResponseText(allContent, provider.providerType);
-        usageForCost = adjustTSeriesUsage(usageResult.usageMetrics, provider, session);
+        // ⭐ 流式响应：T 系列 usage 已在 createTSeriesStreamTransform 中调整，非 T 系列保持原值
+        usageForCost = usageResult.usageMetrics;
 
         // Codex: Extract prompt_cache_key from SSE events and update session binding
         if (provider.providerType === "codex" && session.sessionId && provider.id) {
