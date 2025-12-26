@@ -20,7 +20,11 @@ import { GeminiAdapter } from "../gemini/adapter";
 import type { GeminiResponse } from "../gemini/types";
 import { isClientAbortError } from "./errors";
 import { mapClientFormatToTransformer, mapProviderTypeToTransformer } from "./format-mapper";
-import { adjustTSeriesUsage } from "./others";
+import {
+  adjustTSeriesUsage,
+  adjustTSeriesNonStreamResponse,
+  createTSeriesStreamTransform,
+} from "./others";
 import type { ProxySession } from "./session";
 
 export type UsageMetrics = {
@@ -223,6 +227,14 @@ export class ProxyResponseHandler {
         finalResponse = response;
       }
     }
+
+    // ⭐ T 系列供应商：调整响应体中的 usage，让用户看到调整后的值
+    finalResponse = await adjustTSeriesNonStreamResponse(
+      finalResponse,
+      provider,
+      session,
+      finalResponse === response ? cleanResponseHeaders : undefined
+    );
 
     // 使用 AsyncTaskManager 管理后台处理任务
     const taskId = `non-stream-${messageContext?.id || `unknown-${Date.now()}`}`;
@@ -738,6 +750,10 @@ export class ProxyResponseHandler {
 
       processedStream = response.body.pipeThrough(transformStream) as ReadableStream<Uint8Array>;
     }
+
+    // ⭐ T 系列供应商：调整流式响应中的 usage，让用户看到调整后的值
+    const tSeriesTransform = createTSeriesStreamTransform(provider, session);
+    processedStream = processedStream.pipeThrough(tSeriesTransform);
 
     // ⭐ 使用 TransformStream 包装流，以便在 idle timeout 时能关闭客户端流
     // 这解决了 tee() 后 internalStream abort 不影响 clientStream 的问题

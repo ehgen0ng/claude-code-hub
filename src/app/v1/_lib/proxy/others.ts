@@ -1,8 +1,8 @@
 import type { Provider } from "@/types/provider";
 import type { UsageMetrics } from "./response-handler";
 import type { ProxySession } from "./session";
-import { getRedisClient } from "@/lib/redis/client";
 import { logger } from "@/lib/logger";
+import { getRedisClient } from "@/lib/redis/client";
 
 // T 系列供应商缓存配置
 const CACHE_CONFIG = {
@@ -80,10 +80,9 @@ export function adjustTSeriesUsage(
     if (usage.cache_creation_input_tokens != null) {
       return usage;
     }
-    const cacheCreation = usage.cache_creation_input_tokens ?? 0;
     return {
       ...usage,
-      cache_creation_input_tokens: cacheCreation,
+      cache_creation_input_tokens: 0,
       cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
     };
   }
@@ -100,8 +99,8 @@ export function adjustTSeriesUsage(
 
     const originalInput = usage.input_tokens ?? 0;
 
-    // 输入验证：input_tokens 不足时直接返回原值
-    if (originalInput < CACHE_CONFIG.NEW_INPUT_MIN) {
+    // 输入验证：input_tokens 无效或不足时直接返回原值
+    if (originalInput <= 0 || originalInput < CACHE_CONFIG.NEW_INPUT_MIN) {
       return usage;
     }
 
@@ -122,7 +121,8 @@ export function adjustTSeriesUsage(
 
     // 会话复用：按概率分配缓存写入和读取
     const roll = Math.random();
-    let writeRatio: number = CACHE_CONFIG.REUSE_SCENARIOS[2].writeRatio;
+    const fallbackScenario = CACHE_CONFIG.REUSE_SCENARIOS.at(-1);
+    let writeRatio: number = fallbackScenario?.writeRatio ?? 0.3;
 
     for (const scenario of CACHE_CONFIG.REUSE_SCENARIOS) {
       if (roll < scenario.threshold) {
@@ -145,6 +145,154 @@ export function adjustTSeriesUsage(
   }
 
   return usage;
+}
+
+// =============== T 系列响应体 Usage 调整 ===============
+
+/**
+ * 调整非流式响应体中的 usage 字段
+ */
+function adjustTSeriesResponseBody(
+  responseBody: unknown,
+  provider: Provider,
+  session: ProxySession
+): unknown {
+  if (!responseBody || typeof responseBody !== "object") {
+    return responseBody;
+  }
+
+  const body = responseBody as Record<string, unknown>;
+  if (!body.usage || typeof body.usage !== "object") {
+    return responseBody;
+  }
+
+  const adjustedUsage = adjustTSeriesUsage(body.usage as UsageMetrics, provider, session);
+  return adjustedUsage ? { ...body, usage: adjustedUsage } : responseBody;
+}
+
+/**
+ * 调整 T 系列非流式响应的 usage
+ * 封装完整的 Response 处理逻辑，供 response-handler 调用
+ */
+export async function adjustTSeriesNonStreamResponse(
+  response: Response,
+  provider: Provider | null,
+  session: ProxySession,
+  cleanHeaders?: (headers: Headers) => Headers
+): Promise<Response> {
+  if (!provider || !isTSeriesProvider(provider)) {
+    return response;
+  }
+
+  // 检查 Content-Type，非 JSON 响应直接返回
+  const contentType = response.headers.get("content-type");
+  if (!contentType?.includes("application/json")) {
+    return response;
+  }
+
+  try {
+    const cloned = response.clone();
+    const text = await cloned.text();
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const adjusted = adjustTSeriesResponseBody(parsed, provider, session);
+    if (adjusted !== parsed) {
+      logger.info("[TSeriesNonStream] Usage adjusted", {
+        providerId: provider.id,
+        providerName: provider.name,
+        sessionId: session.sessionId?.substring(0, 20),
+      });
+      return new Response(JSON.stringify(adjusted), {
+        status: response.status,
+        statusText: response.statusText,
+        headers: cleanHeaders ? cleanHeaders(response.headers) : response.headers,
+      });
+    }
+  } catch (error) {
+    logger.error("[TSeriesNonStream] Failed to parse response", {
+      error: error instanceof Error ? error.message : String(error),
+      providerId: provider.id,
+    });
+  }
+
+  return response;
+}
+
+/**
+ * 创建 T 系列流式响应的 Usage 调整 TransformStream
+ * 拦截 SSE 事件，修改包含 usage 的事件
+ */
+export function createTSeriesStreamTransform(
+  provider: Provider,
+  session: ProxySession
+): TransformStream<Uint8Array, Uint8Array> {
+  if (!isTSeriesProvider(provider)) {
+    // 非 T 系列供应商，直接透传
+    return new TransformStream();
+  }
+
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  return new TransformStream({
+    transform(chunk, controller) {
+      buffer += decoder.decode(chunk, { stream: true });
+
+      // 按行分割处理
+      const lines = buffer.split("\n");
+      // 保留最后一个不完整的行
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) {
+          controller.enqueue(encoder.encode(line + "\n"));
+          continue;
+        }
+
+        const dataContent = line.slice(6); // 去掉 "data: "
+        if (dataContent === "[DONE]") {
+          controller.enqueue(encoder.encode(line + "\n"));
+          continue;
+        }
+
+        try {
+          // 直接解析 JSON，而不是使用 parseSSEData（返回数组，不适用于此场景）
+          const parsed = JSON.parse(dataContent) as Record<string, unknown>;
+          if (parsed && typeof parsed === "object" && "usage" in parsed && parsed.usage) {
+            const adjustedUsage = adjustTSeriesUsage(
+              parsed.usage as UsageMetrics,
+              provider,
+              session
+            );
+            if (adjustedUsage) {
+              const modified = { ...parsed, usage: adjustedUsage };
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(modified)}\n`));
+              logger.info("[TSeriesTransform] Usage adjusted in SSE event", {
+                providerId: provider.id,
+                sessionId: session.sessionId?.substring(0, 20),
+              });
+              continue;
+            }
+          }
+        } catch (error) {
+          // JSON 解析失败，记录错误后原样输出
+          logger.error("[TSeriesTransform] Failed to parse SSE data", {
+            error: error instanceof Error ? error.message : String(error),
+            providerId: provider.id,
+            dataPreview: dataContent.slice(0, 100),
+          });
+        }
+
+        controller.enqueue(encoder.encode(line + "\n"));
+      }
+    },
+    flush(controller) {
+      // 处理剩余的 buffer
+      if (buffer.length > 0) {
+        controller.enqueue(encoder.encode(buffer));
+      }
+    },
+  });
 }
 
 // =============== 供应商 User ID 池管理 ===============
